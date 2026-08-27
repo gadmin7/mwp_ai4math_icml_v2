@@ -33,34 +33,50 @@ The whole one-line `ssh-ed25519 AAAA... you@host` string goes in.
 
 ---
 
-## 2. Launch the instance
+## 2. Launch — a Template, not a VM
+
+JarvisLabs offers two products on the same GPUs at the same price:
+
+| | **Template** ← use this | VM |
+|---|---|---|
+| what it is | pre-built container; they manage OS, drivers, CUDA, runtime | clean VM, full root, your own kernel/Docker |
+| PyTorch + CUDA | **preinstalled** | you install it yourself |
+| boot | ~2 s | ~90 s |
+
+**Launch the PyTorch Template.** This is load-bearing, not cosmetic: `requirements.txt`
+deliberately leaves torch unpinned and `jarvislabs_setup.sh` builds its venv with
+`--system-site-packages`, both so we inherit the image's CUDA-matched torch. A bare VM
+has no torch to inherit, so pip would pull a multi-GB wheel that may not match the
+driver. We need no root, Docker or systemd, so the VM buys nothing here.
 
 Dashboard → **Create instance**:
 
 | setting | value | why |
 |---|---|---|
-| Framework/template | PyTorch (CUDA base image) | `requirements.txt` installs the rest; avoid task-specific templates |
+| Template | **PyTorch** | avoid task-specific templates; we install the rest |
 | GPU | **A100 80GB** | bandwidth helps the generation-heavy eval; 40GB also fits this 1B model |
 | GPU count | **1** | nothing here is multi-GPU; use more only to run arms in parallel |
 | Storage | **100 GB** | actual use ≈ 25–30 GB, so this is comfortable |
-| Public IP | **Dynamic** | Reserved IP is ₹475/month flat and only pays off for a stable DNS/allowlist |
 | Startup script | *(none)* | we bootstrap explicitly in step 4 |
-
-CLI equivalent, if you prefer: `jl create --vm --gpu A100 --storage 100`
 
 ---
 
 ## 3. Connect
 
+Copy the SSH command from the dashboard (copy icon next to **SSH**). Templates connect
+through a shared gateway on a **per-instance port**, so it looks like:
+
 ```bash
-ssh cloud@<instance-ip-or-dns>
+ssh -o StrictHostKeyChecking=no -p <port> root@sshd.jarvislabs.ai
 ```
 
-The username is **`cloud`**. No password — auth is via the key from step 1. For a key
-in a non-default location: `ssh -i ~/.ssh/my_key cloud@<host>`.
+The user is **`root`** and the port is what identifies your instance — always copy the
+current command from the dashboard rather than reusing an old one, since **the port can
+change when an instance is resumed**. For a key in a non-default location, add
+`-i ~/.ssh/my_key`.
 
-If it refuses the key, the usual cause is that the key was added *after* the instance
-launched — re-add it and restart the instance.
+No password — auth uses the key from step 1. If the key is refused, the usual cause is
+that it was registered *after* the instance booted: re-add it and restart the instance.
 
 ---
 
@@ -71,7 +87,7 @@ curl -sSL https://raw.githubusercontent.com/gadmin7/mwp_ai4math_icml_v2/main/clo
 bash setup.sh
 ```
 
-It clones the repo, builds a venv **under `$HOME`** (see §7), installs requirements,
+It clones the repo, builds a venv **under `/home`** (see §7), installs requirements,
 prompts for `hf auth login`, and then runs both verification passes — the smoke test
 and a full end-to-end dry run — *before* you spend money on a real job.
 
@@ -88,11 +104,13 @@ read-only token fails at the first push, i.e. only after a stage has finished tr
 Every shell needs the environment first:
 
 ```bash
-source ~/mwp-venv/bin/activate
-export HF_HOME="$HOME/.cache/huggingface"
+source /home/mwp-venv/bin/activate
+export HF_HOME=/home/.cache/huggingface
 export HF_TOKEN=$(hf auth token)
-cd ~/mwp_ai4math_icml_v2 && mkdir -p runs
+cd /home/mwp_ai4math_icml_v2 && mkdir -p runs
 ```
+
+> Paths are under `/home`, not `~`, deliberately — see §7.
 
 Run each arm in its own tmux session, so a dropped SSH connection can't kill it:
 
@@ -142,13 +160,16 @@ changing.
 
 Two behaviours to plan around:
 
-1. **Only `/home` persists.** Anything installed into system site-packages is lost on
-   resume. This is why the bootstrap puts the venv at `~/mwp-venv` and the HF cache at
-   `~/.cache/huggingface` — both survive, so a resumed box keeps its dependencies and
-   its multi-GB model downloads. After a resume, just re-source the environment (§5);
-   only re-run `setup.sh` if imports fail.
-2. **The public IP changes on resume** (dynamic IP). Get the new one from the dashboard
-   before reconnecting. Training inside tmux is unaffected by your disconnection.
+1. **Only `/home` persists.** Anything installed globally (system pip, `apt`) is lost on
+   resume. Note the trap: templates log you in as **root**, so `$HOME` is `/root`, which
+   is *not* persistent — a venv at `~/mwp-venv` would be wiped on every resume. That is
+   why the bootstrap hardcodes `/home/mwp-venv` and `/home/.cache/huggingface` instead of
+   using `$HOME`. A resumed box therefore keeps both its dependencies and its multi-GB
+   model downloads. After a resume just re-source the environment (§5); only re-run
+   `setup.sh` if imports fail.
+2. **Connection details can change on resume.** Re-copy the SSH command from the
+   dashboard — the port is what identifies the instance. Training inside tmux is
+   unaffected by your disconnection.
 
 **Pausing still bills storage.** Deleting is irreversible and takes `/home` with it —
 so confirm your checkpoints are on the Hub first (§8).
@@ -168,7 +189,7 @@ weight-geometry analysis load. Pull anything you want to keep locally:
 
 ```bash
 # from your Mac
-scp -r cloud@<host>:~/mwp_ai4math_icml_v2/runs ./runs-from-cloud
+scp -P <port> -r root@sshd.jarvislabs.ai:/home/mwp_ai4math_icml_v2/runs ./runs-from-cloud
 ```
 
 `runs/*-log_history.json` holds the per-stage loss curves and step counts — worth

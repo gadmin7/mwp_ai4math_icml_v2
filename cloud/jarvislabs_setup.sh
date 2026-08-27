@@ -1,26 +1,32 @@
 #!/usr/bin/env bash
-# Bootstrap a JarvisLabs instance for a real training run.
-# Target: A100 80GB, 28 vCPU, 112GB RAM, 100GB storage, dynamic IP.
-# Batch sizes / worker counts in configs/*.yaml and src/evaluate.py are tuned for
-# this tier -- halve batch_size and drop workers to 2-4 on the 40GB/16-vCPU tier.
+# Bootstrap a JarvisLabs PyTorch TEMPLATE for a real training run.
+# Target: A100 80GB, 28 vCPU, 112GB RAM, 100GB storage.
+#
+# Launch a Template (pre-built PyTorch container), NOT a VM: requirements.txt
+# deliberately leaves torch unpinned and the venv below uses --system-site-packages,
+# both so we inherit the image's CUDA-matched torch instead of pulling a multi-GB
+# wheel that may not match the driver. A bare VM has no torch to inherit.
+#
+# Batch sizes / worker counts in configs/*.yaml and src/evaluate.py are tuned for this
+# tier -- halve batch_size and drop workers to 2-4 on the 40GB/16-vCPU tier.
 #
 # See cloud/RUNBOOK.md for the full launch-to-teardown procedure.
-# Run once per fresh instance; re-run after a pause/resume (see PERSISTENCE below).
+# Safe to re-run; re-run after a pause/resume only if imports fail.
 set -euo pipefail
 
 REPO_URL="https://github.com/gadmin7/mwp_ai4math_icml_v2.git"
-REPO_DIR="$HOME/mwp_ai4math_icml_v2"
-VENV="$HOME/mwp-venv"
 
-# PERSISTENCE: on JarvisLabs only /home survives a pause/resume. Packages pip-installed
-# into the system site-packages are LOST when the instance is resumed. So we install
-# into a venv under $HOME, and point the HF cache at $HOME too, which means a resumed
-# instance keeps both the dependencies and the (multi-GB) model downloads.
-# --system-site-packages inherits the image's CUDA-matched torch instead of
-# re-downloading a build that may not match the driver.
-export HF_HOME="$HOME/.cache/huggingface"
+# PERSISTENCE: only /home survives a pause/resume on JarvisLabs. Anything installed
+# globally (system pip, apt) is lost on resume. Note these paths are hardcoded to
+# /home rather than $HOME on purpose -- templates log you in as root, where $HOME is
+# /root, which is NOT persistent. Keeping the venv and the HF cache under /home means
+# a resumed instance keeps both its dependencies and its multi-GB model downloads.
+PERSIST="/home"
+REPO_DIR="$PERSIST/mwp_ai4math_icml_v2"
+VENV="$PERSIST/mwp-venv"
+export HF_HOME="$PERSIST/.cache/huggingface"
 
-echo "== cloning repo =="
+echo "== cloning repo into $REPO_DIR =="
 if [ -d "$REPO_DIR/.git" ]; then
   git -C "$REPO_DIR" pull --ff-only
 else
@@ -28,7 +34,7 @@ else
 fi
 cd "$REPO_DIR"
 
-echo "== python venv (in \$HOME so it survives pause/resume) =="
+echo "== python venv at $VENV (under /home so it survives pause/resume) =="
 if [ ! -d "$VENV" ]; then
   python3 -m venv --system-site-packages "$VENV"
 fi
@@ -83,9 +89,9 @@ cat <<NOTE
 Every new shell (including after a resume) needs:
 
   source $VENV/bin/activate
-  export HF_HOME="$HOME/.cache/huggingface"
+  export HF_HOME="$HF_HOME"
   export HF_TOKEN=\$(hf auth token)
-  cd $REPO_DIR
+  cd $REPO_DIR && mkdir -p runs
 
 Then launch a baseline inside tmux so it survives a dropped SSH connection:
 
