@@ -203,7 +203,13 @@ def load_stacked_model(
     return model
 
 
-def generate_predictions(model, tokenizer, test_ds, batch_size: int = 32, max_new_tokens: int = 512) -> pd.DataFrame:
+def generate_predictions(
+    model, tokenizer, test_ds, batch_size: int = 64, max_new_tokens: int = 512, num_workers: int = 4,
+) -> pd.DataFrame:
+    """batch_size/num_workers default to values tuned for an 80GB-class GPU with
+    ~28 vCPUs (JarvisLabs A100 80GB tier); drop batch_size to 32 and num_workers
+    to 2 on a 40GB/16-vCPU box.
+    """
     samples = [
         {
             "input_text": PROMPT_TEMPLATE.format(problem=x["problem"], solution=""),
@@ -216,15 +222,17 @@ def generate_predictions(model, tokenizer, test_ds, batch_size: int = 32, max_ne
     ]
 
     def collate(batch):
+        # Stay on CPU here -- this may run in a DataLoader worker subprocess;
+        # moving to the GPU happens in the main loop below instead.
         texts = [s["input_text"] for s in batch]
         enc = tokenizer(texts, padding=True, truncation=True, max_length=1024, return_tensors="pt")
-        enc = {k: v.to(model.device) for k, v in enc.items()}
         return enc, batch
 
-    loader = DataLoader(samples, batch_size=batch_size, collate_fn=collate)
+    loader = DataLoader(samples, batch_size=batch_size, collate_fn=collate, num_workers=num_workers)
     rows = []
     with torch.no_grad():
         for enc, batch in tqdm(loader, desc="generating"):
+            enc = {k: v.to(model.device) for k, v in enc.items()}
             out_ids = model.generate(
                 input_ids=enc["input_ids"], attention_mask=enc["attention_mask"],
                 max_new_tokens=max_new_tokens, do_sample=False,
@@ -239,10 +247,10 @@ def generate_predictions(model, tokenizer, test_ds, batch_size: int = 32, max_ne
 
 def evaluate_baseline(
     baseline: BaselineSpec, base_model_id: str, hf_org: str, model_tag: str,
-    test_ds, quantize: bool = True, token: str = None, batch_size: int = 32,
+    test_ds, quantize: bool = True, token: str = None, batch_size: int = 64, num_workers: int = 4,
 ) -> pd.DataFrame:
     model = load_stacked_model(base_model_id, baseline, hf_org, model_tag, quantize, token)
     from src.pipeline import make_tokenizer
     tokenizer = make_tokenizer(base_model_id, token=token)
-    preds = generate_predictions(model, tokenizer, test_ds, batch_size=batch_size)
+    preds = generate_predictions(model, tokenizer, test_ds, batch_size=batch_size, num_workers=num_workers)
     return score(preds)

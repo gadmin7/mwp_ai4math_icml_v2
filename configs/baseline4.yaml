@@ -4,5 +4,5 @@ model_tag: llama1b
 hf_org: GT1999
 push_to_hub: true
 quantize: true
-batch_size: 16
+batch_size: 32
 seed: 42

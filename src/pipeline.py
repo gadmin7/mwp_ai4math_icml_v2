@@ -89,7 +89,12 @@ def run_baseline(
     hf_token: str = None,
     seed: int = 42,
     batch_size: int = 4,
+    dataloader_num_workers: int = 8,
+    map_num_proc: int = 8,
 ) -> dict:
+    """dataloader_num_workers/map_num_proc default to 8 -- tuned for a ~28 vCPU
+    instance (JarvisLabs A100 80GB tier); drop to 2-4 on a 16-vCPU box.
+    """
     from trl import SFTTrainer  # deferred: only the real training path needs trl
 
     baseline = get_baseline(baseline_id)
@@ -104,8 +109,8 @@ def run_baseline(
     for stage in range(1, baseline.num_stages + 1):
         print(f"\n=== {baseline_id} stage {stage}/{baseline.num_stages} ===")
         train_raw, val_raw = dataset_for_stage(splits, baseline, stage)
-        train_tok = train_raw.map(preprocess, batched=True)
-        val_tok = val_raw.map(preprocess, batched=True)
+        train_tok = train_raw.map(preprocess, batched=True, num_proc=map_num_proc)
+        val_tok = val_raw.map(preprocess, batched=True, num_proc=map_num_proc)
 
         prev_path = None
         if stage > 1 and not push_to_hub:
@@ -141,6 +146,7 @@ def run_baseline(
             load_best_model_at_end=True,
             metric_for_best_model="eval_loss",
             greater_is_better=False,
+            dataloader_num_workers=dataloader_num_workers,
         )
         trainer = SFTTrainer(
             model=model,

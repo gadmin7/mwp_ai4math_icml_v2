@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Bootstrap a JarvisLabs A100 40GB instance for a real training run.
+# Bootstrap a JarvisLabs instance for a real training run.
+# Provisioned as: A100 80GB, 28 vCPU, 112GB RAM, 100GB storage, dynamic IP.
+# batch sizes and worker counts in configs/*.yaml and src/evaluate.py are tuned
+# for this tier -- halve batch_size and drop workers to 2-4 if run on the 40GB/
+# 16-vCPU tier instead.
 # Run once per fresh instance, then use scripts/run_baseline.py.
 set -euo pipefail
 

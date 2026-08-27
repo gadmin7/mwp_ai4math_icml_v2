@@ -52,8 +52,10 @@ disjointness + weight-geometry tooling + HF naming, in a few seconds, no GPU):
 python scripts/smoke_test.py --push   # --push also exercises the HF upload path
 ```
 
-**2. Cloud GPU** (JarvisLabs, 1× A100 40GB recommended — sufficient VRAM for this
-model at r=256, and the throughput needed to finish all 6 baselines well inside a day):
+**2. Cloud GPU** (JarvisLabs, 1× A100 80GB / 28 vCPU / 112GB RAM / 100GB storage —
+more than this 1B model at r=256 strictly needs, but the extra memory bandwidth over
+the 40GB tier speeds up the generation-heavy eval tail; batch sizes below are tuned
+for this instance, halve them on the 40GB/16-vCPU tier):
 
 ```bash
 bash cloud/jarvislabs_setup.sh

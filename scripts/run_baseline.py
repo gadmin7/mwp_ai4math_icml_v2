@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--output-dir", default="runs")
     parser.add_argument("--no-push", action="store_true")
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--dataloader-num-workers", type=int, default=8)
+    parser.add_argument("--map-num-proc", type=int, default=8)
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -48,6 +50,8 @@ def main():
         hf_token=hf_token,
         seed=cfg["seed"],
         batch_size=args.batch_size or cfg.get("batch_size", 4),
+        dataloader_num_workers=args.dataloader_num_workers,
+        map_num_proc=args.map_num_proc,
     )
 
 
