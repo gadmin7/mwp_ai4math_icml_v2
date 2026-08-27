@@ -20,8 +20,12 @@ echo "== huggingface auth =="
 echo "Run: hf auth login   (needs your token, can't be scripted)"
 read -p "Press enter once logged in..."
 
-echo "== re-running the smoke test on real CUDA + bitsandbytes before spending on full runs =="
+echo "== smoke test on real CUDA + bitsandbytes before spending on full runs =="
 python3 scripts/smoke_test.py --skip-data
+
+echo "== end-to-end dry run of the real pipeline (tiny model, ~1 min) =="
+# Catches API/version breakage on THIS box before a multi-hour run starts.
+python3 scripts/dry_run.py --baseline b6 --n-per-level 40
 
 echo "== ready. Launch a baseline with, e.g.: =="
 echo "  export HF_TOKEN=\$(hf auth token)"

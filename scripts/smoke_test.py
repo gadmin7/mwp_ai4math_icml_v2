@@ -88,11 +88,37 @@ def test_adapter_stacking():
     model = _train_one_stage(model, tokenizer)
     stage1_before = _snapshot(model, stage_adapter_name(1))
 
+    # Logits with only stage 1 present, for the activation check below.
+    model.eval()
+    probe = _tokenize_batch(tokenizer, FAKE_TEXTS[:1])
+    with torch.no_grad():
+        stage1_logits = model(**probe).logits.clone()
+
     model = prepare_stage_model(
         stage=2, baseline=FAKE_BASELINE, base_model_id=TINY_MODEL,
         prev_model=model, prev_adapter_path=None, quantize=False,
     )
     assert_stage_frozen(model, frozen_stage=1)
+
+    # Regression guard: `set_adapter("stage_2")` activates that adapter EXCLUSIVELY,
+    # silently switching stage 1 off so the forward pass collapses to the bare base
+    # model. Freezing assertions alone do NOT catch that -- a deactivated adapter is
+    # also an unchanged one. A newly added adapter has lora_B == 0 and contributes
+    # exactly nothing, so with the stack correctly active the logits must not move.
+    active = set(model.active_adapters)
+    assert active == {stage_adapter_name(1), stage_adapter_name(2)}, (
+        f"expected stages 1+2 active in the forward pass, got {sorted(active)}"
+    )
+    model.eval()
+    with torch.no_grad():
+        stacked_logits = model(**probe).logits
+    drift = (stacked_logits - stage1_logits).abs().max().item()
+    assert drift < 1e-6, (
+        f"adding stage 2 changed the forward pass by {drift:.6f}; stage 1's "
+        "contribution was lost (a fresh adapter must contribute exactly 0)"
+    )
+    print("OK: stage 1 stays active in the forward pass after stage 2 is added")
+
     model = _train_one_stage(model, tokenizer)
 
     stage1_after = _snapshot(model, stage_adapter_name(1))
@@ -100,6 +126,13 @@ def test_adapter_stacking():
         after = stage1_after[name]
         assert torch.equal(before, after), f"stage 1 weight {name} changed after training stage 2!"
     print(f"OK: {len(stage1_before)} stage-1 LoRA tensors bit-identical after stage-2 training")
+
+    # The flip side: the *current* stage must actually be learning.
+    stage2_trained = _snapshot(model, stage_adapter_name(2))
+    assert any(t.abs().sum().item() > 0 for n, t in stage2_trained.items() if "lora_B" in n), (
+        "stage 2's lora_B is still all zeros -- no gradient reached the active adapter"
+    )
+    print("OK: stage 2 received gradient (its lora_B moved off zero)")
 
     model = prepare_stage_model(
         stage=3, baseline=FAKE_BASELINE, base_model_id=TINY_MODEL,

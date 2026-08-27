@@ -161,6 +161,18 @@ def accuracy(df: pd.DataFrame) -> float:
     return df["correct"].mean()
 
 
+def box_rate(df: pd.DataFrame) -> float:
+    """Fraction of predictions that actually contained a \\boxed{...}.
+
+    Worth reporting alongside EM: `extract_math_answer(..., answer_flag=True)` falls
+    back to the raw text when no box is present, which then essentially never matches.
+    Unboxed generations are therefore scored as wrong -- usually the right call (the
+    prompt mandates a box), but a low box rate means EM is measuring format compliance
+    as much as mathematical correctness, so it should not go unnoticed.
+    """
+    return df["predicted_solution"].str.contains("boxed", regex=False).mean()
+
+
 def accuracy_by_level(df: pd.DataFrame) -> pd.DataFrame:
     return df.groupby("level")["correct"].mean().reset_index(name="accuracy")
 

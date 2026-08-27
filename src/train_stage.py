@@ -106,19 +106,47 @@ def prepare_stage_model(
             model.load_adapter(prev_adapter_path_for_stage(prev_adapter_path, s), adapter_name=stage_adapter_name(s))
 
     model.add_adapter(adapter_name, lora_cfg)
-    model.set_adapter(adapter_name)
+    activate_stack(model, through_stage=stage)
     _freeze_all_but(model, adapter_name)
     return model
+
+
+def activate_stack(model: PeftModel, through_stage: int) -> None:
+    """Make stages 1..through_stage ALL active in the forward pass.
+
+    Critical: `set_adapter("stage_N")` activates that adapter *exclusively*, which
+    silently switches earlier stages off -- the forward pass then collapses back to
+    the bare base model and the new stage learns as if no curriculum had happened.
+    The whole premise of PLRS is that stage i trains on top of the frozen stack of
+    stages 1..i-1, so every stage must stay active; only trainability differs
+    (see _freeze_all_but, which must be called AFTER this -- activating an adapter
+    also re-enables requires_grad on it).
+    """
+    stack = [stage_adapter_name(s) for s in range(1, through_stage + 1)]
+    # Go through base_model (the LoraModel tuner): it accepts a list of adapters,
+    # whereas PeftModel.set_adapter takes a single name.
+    model.base_model.set_adapter(stack)
 
 
 def prev_adapter_path_for_stage(any_stage_path: str, stage: int) -> str:
     """Given one stage's checkpoint dir, derive another stage's sibling dir.
 
-    Assumes the naming convention `<prefix>-stage{N}` used throughout pipeline.py.
+    pipeline.py lays checkpoints out as `<output_dir>/<baseline_id>-stage{N}/stage_{N}`
+    (the inner directory is peft's per-adapter nesting). Both occurrences of the stage
+    number have to be rewritten.
+
+    Raises rather than returning an unchanged path: silently handing back the wrong
+    stage's directory would load the wrong weights and quietly corrupt the results.
     """
     import re
 
-    return re.sub(r"stage\d+$", stage_adapter_name(stage), any_stage_path)
+    pattern = re.compile(r"-stage\d+/" + re.escape(STAGE_PREFIX) + r"\d+/?$")
+    if not pattern.search(any_stage_path):
+        raise ValueError(
+            f"cannot derive stage-{stage} path from {any_stage_path!r}: expected a path "
+            f"ending in '-stage<N>/{STAGE_PREFIX}<N>'"
+        )
+    return pattern.sub(f"-stage{stage}/{stage_adapter_name(stage)}", any_stage_path)
 
 
 def assert_stage_frozen(model: PeftModel, frozen_stage: int) -> None:

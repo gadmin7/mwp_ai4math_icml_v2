@@ -45,12 +45,22 @@ code commit that produced it.
 
 ## Running
 
-**1. Local smoke test first, always** (validates adapter freezing + data-split
-disjointness + weight-geometry tooling + HF naming, in a few seconds, no GPU):
+**1. Local verification first, always** — no GPU needed, runs in about a minute:
 
 ```bash
-python scripts/smoke_test.py --push   # --push also exercises the HF upload path
+python scripts/smoke_test.py --push        # --push also exercises the HF upload path
+python scripts/dry_run.py --baseline b6    # drives the REAL pipeline on a tiny model
 ```
+
+`smoke_test.py` checks the adapter/data logic in isolation: that each stage stays
+**active in the forward pass** while earlier stages are frozen, that train/val/test are
+pairwise disjoint, and that the weight-geometry tooling and HF naming work.
+
+`dry_run.py` drives `run_baseline` itself, so it covers what unit-level checks cannot:
+`TrainingArguments` construction against the installed transformers, the `Trainer` loop,
+early stopping, best-checkpoint restore on a multi-adapter model, and the on-disk
+checkpoint layout. Run it on the cloud box too before starting a multi-hour job —
+`cloud/jarvislabs_setup.sh` does this automatically.
 
 **2. Cloud GPU** (JarvisLabs, 1× A100 80GB / 28 vCPU / 112GB RAM / 100GB storage —
 more than this 1B model at r=256 strictly needs, but the extra memory bandwidth over
