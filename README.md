@@ -37,6 +37,9 @@ study lacks, defined in [`src/lora_schedule.py`](src/lora_schedule.py):
 | b8 | 102×5 | yes | 359.3M (99.6% of b6) | **constant** rank |
 | b9 | 256 (single pass) | – | 180.4M | Table 2's heavy baseline |
 | b10 | 256 + rsLoRA | – | 180.4M | same, `alpha/√r` scaling |
+| b11 | 102×5, **random** partition | yes | 359.3M | is difficulty ordering needed? |
+| b12 | 102×5, **reverse** partition | yes | 359.3M | anti-curriculum (hard→easy) |
+| b13 | 102, single pass, **5:4:3:2:1 weighted** | – | 71.9M | is staging just reweighting? |
 
 **Why b7/b8.** No arm in b1–b6 *expands*, so "shrinking helps" is never tested against
 its opposite; and b4-vs-b6 confounds schedule *shape* with total capacity (b6 has ~3×
@@ -55,6 +58,38 @@ compensating for the bug described above.
 capacity *scheduling* rather than rank budget drives the gains. But `alpha/r` scaling is
 known to under-serve large ranks: at r=256 the effective gain is 2.0, versus 32.0 under
 rank-stabilized scaling. b9 vs b10 tests whether that result is a scaling artifact.
+
+**Why b11/b12/b13 — does easy→hard actually matter?** Comparing the direct baseline to a
+sequential run cannot answer this: it varies stage count, total steps, ordering, per-level
+exposure, adapter structure and rank simultaneously. b8/b11/b12 instead fix rank, stage
+sizes and total steps, varying only how difficulty is distributed across stages
+(`src/data.py::assign_stages` chunks a rank-ordering into blocks whose sizes are the level
+counts, so the difficulty arm reproduces the natural level boundaries exactly).
+
+Note that under cumulative replay, ordering and exposure are **coupled** — whatever trains
+first is replayed most — so they cannot be varied independently. Measured mean number of
+stages each level is trained in:
+
+| arm | L1 | L2 | L3 | L4 | L5 | |
+|---|---|---|---|---|---|---|
+| b8 difficulty | 5.00 | 4.00 | 3.00 | 2.00 | 1.00 | the 5:4:3:2:1 gradient |
+| b11 random | 2.58 | 2.39 | 2.55 | 2.50 | 2.47 | flat |
+| b12 reverse | 1.00 | 1.00 | 1.75 | 2.71 | 4.07 | inverted |
+
+Each arm therefore tests an ordering *package* (order plus the exposure it induces).
+**b13** supplies the missing piece by isolating the reweighting alone — a single pass over
+a dataset where each example is repeated `6 − level` times, which reproduces the staged
+pipeline's per-level exposure *and* its exact total step count (17,741 examples = the sum
+of the staged cumulative sizes). Together they decompose the effect:
+
+- `b13 ≈ b8` → the gain is just reweighting; staging adds nothing.
+- `b11 ≈ b8` → staging helps, but the difficulty ordering does not.
+- `b8 > b11, b12, b13` → the curriculum genuinely contributes.
+
+The per-level breakdown of **b8 vs b11** is also the direct test of the paper's *positive
+backward transfer* claim: level-1 data receives 5× the gradient exposure of level-5 under
+the difficulty curriculum, so the Level-1 gain (42.1→53.3) may be exposure rather than
+transfer. b11 flattens exposure, so a Level-1 gain that survives there is genuine transfer.
 
 ## Layout
 

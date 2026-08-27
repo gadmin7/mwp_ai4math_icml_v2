@@ -29,6 +29,13 @@ class BaselineSpec:
     # alpha/r scaling is known to under-serve large ranks, which is a candidate
     # explanation for the r=256 single-pass baseline underperforming r=32 -- see b9/b10.
     use_rslora: bool = False
+    # How examples are assigned to stages: "difficulty" (the paper's easy->hard
+    # curriculum), "random", or "reverse". All three use identical stage sizes and
+    # therefore identical exposure and step counts -- see data.assign_stages.
+    partition: str = "difficulty"
+    # Single-pass arm that reproduces cumulative replay's 5:4:3:2:1 per-level exposure
+    # by duplication, to test whether staging adds anything over reweighting alone.
+    exposure_weighted: bool = False
 
     def stage_config(self, stage: int) -> LoraStageConfig:
         r = self.ranks[stage - 1]
@@ -101,6 +108,51 @@ BASELINES = {
     "b10": BaselineSpec(
         id="b10", name="Direct baseline, single pass r=256 + rsLoRA scaling",
         replay=False, num_stages=1, ranks=[256], use_rslora=True,
+    ),
+    # --- Does easy->hard ORDERING actually matter? ------------------------------
+    # b1-vs-b6 cannot answer this: it varies stage count, total steps, ordering,
+    # per-level exposure, adapter structure and rank all at once. b8/b11/b12 fix the
+    # rank (constant r=102), stage sizes, cumulative sizes and total step count, and
+    # vary the difficulty composition of each stage:
+    #   b8  difficulty (easy->hard)   b11 random (mixed)   b12 reverse (hard->easy)
+    # Constant rank is deliberate -- a shrinking schedule would interact with the
+    # ordering ("big rank for stage 1" is incoherent when stage 1 is random or hardest).
+    #
+    # IMPORTANT: under cumulative replay, ordering and per-level exposure are coupled by
+    # construction -- whatever goes first is replayed most, so they cannot be varied
+    # independently. Measured mean stages-trained-in, per level:
+    #   b8  difficulty : L1=5.00 L2=4.00 L3=3.00 L4=2.00 L5=1.00   (the 5:4:3:2:1 gradient)
+    #   b11 random     : L1=2.58 L2=2.39 L3=2.55 L4=2.50 L5=2.47   (flat)
+    #   b12 reverse    : L1=1.00 L2=1.00 L3=1.75 L4=2.71 L5=4.07   (inverted)
+    # So each arm tests an ordering *package* (order + the exposure it induces), not
+    # ordering in isolation. b13 supplies the missing piece by isolating the exposure
+    # weighting with no staging or ordering at all, giving a three-way decomposition:
+    #   b13 = exposure only        b11 = staging, no difficulty signal, flat exposure
+    #   b8  = staging + easy->hard ordering + 5:4:3:2:1 exposure
+    # b13 ~ b8 would mean the effect is just reweighting; b11 ~ b8 would mean staging
+    # helps but the difficulty ordering does not.
+    #
+    # b8 vs b11 per-level is also the test of the "positive backward transfer" claim:
+    # level-1 data gets 5x the exposure of level-5 under the difficulty curriculum, so
+    # the Level-1 gain (42.1 -> 53.3) may be exposure rather than transfer. b11 flattens
+    # exposure, so a Level-1 gain that survives there is genuine transfer.
+    "b11": BaselineSpec(
+        id="b11", name="SFR + constant r=102, RANDOM stage partition",
+        replay=True, num_stages=5, ranks=[102] * 5, partition="random",
+    ),
+    "b12": BaselineSpec(
+        id="b12", name="SFR + constant r=102, REVERSE (hard->easy) partition",
+        replay=True, num_stages=5, ranks=[102] * 5, partition="reverse",
+    ),
+    # Is sequential fine-tuning anything more than a data reweighting? Single pass over
+    # an exposure-matched dataset (each example repeated 6-L times): same per-level
+    # gradient budget and same total steps as the staged pipeline, no staging.
+    # Caveat when reading b13 vs b8: b13 has one r=102 adapter (71.9M) against b8's five
+    # (359.3M), so only a b13 >= b8 result is unambiguous -- it would show staging adds
+    # nothing beyond reweighting despite 5x the capacity.
+    "b13": BaselineSpec(
+        id="b13", name="Single pass, exposure-weighted 5:4:3:2:1, r=102",
+        replay=False, num_stages=1, ranks=[102], exposure_weighted=True,
     ),
 }
 

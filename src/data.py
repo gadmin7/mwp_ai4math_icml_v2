@@ -67,10 +67,70 @@ def assert_disjoint(train: Dataset, val: Dataset, test: Dataset) -> None:
 
 
 def stage_slice(ds: Dataset, stage_level: int, replay: bool) -> Dataset:
-    """D_i for a given stage: cumulative (replay=True) or level-only (replay=False)."""
+    """D_i for a given stage: cumulative (replay=True) or level-only (replay=False).
+
+    Operates on the `stage` column added by assign_stages(), which for the default
+    "difficulty" strategy is identical to the difficulty level.
+    """
+    column = "stage" if "stage" in ds.column_names else None
+    key = (lambda x: x["stage"]) if column else _level_int
     if replay:
-        return ds.filter(lambda x: _level_int(x) <= stage_level)
-    return ds.filter(lambda x: _level_int(x) == stage_level)
+        return ds.filter(lambda x: key(x) <= stage_level)
+    return ds.filter(lambda x: key(x) == stage_level)
+
+
+def assign_stages(ds: Dataset, strategy: str = "difficulty", seed: int = 42, num_stages: int = 5) -> Dataset:
+    """Add a `stage` column assigning each example to one of num_stages partitions.
+
+    Partitions are built by rank-ordering the examples and chunking into blocks whose
+    sizes equal the per-level counts. Because those chunk sizes ARE the level sizes,
+    "difficulty" reproduces the natural level boundaries exactly, while every strategy
+    yields identical stage sizes, cumulative sizes, replay-exposure counts and step
+    counts. Only the difficulty *composition* of each partition differs -- which is
+    what makes this a controlled test of curriculum ordering rather than a comparison
+    that also varies how much training each level receives.
+
+      difficulty : ascending  -> stage i == level i (the paper's curriculum)
+      reverse    : descending -> stage 1 is the hardest problems (matched anti-curriculum)
+      random     : shuffled   -> each stage is a mixed-difficulty sample
+    """
+    levels = [_level_int(x) for x in ds]
+    sizes = [levels.count(level) for level in range(1, num_stages + 1)]
+
+    order = list(range(len(ds)))
+    if strategy == "difficulty":
+        order.sort(key=lambda i: levels[i])
+    elif strategy == "reverse":
+        order.sort(key=lambda i: -levels[i])
+    elif strategy == "random":
+        random.Random(seed).shuffle(order)
+    else:
+        raise ValueError(f"unknown partition strategy {strategy!r}")
+
+    stage_of = [0] * len(ds)
+    pos = 0
+    for stage, size in enumerate(sizes, start=1):
+        for i in order[pos:pos + size]:
+            stage_of[i] = stage
+        pos += size
+    assert 0 not in stage_of, "some example was left unassigned"
+    return ds.add_column("stage", stage_of)
+
+
+def exposure_weighted(ds: Dataset, num_stages: int = 5) -> Dataset:
+    """Duplicate each example to match cumulative replay's implicit reweighting.
+
+    Under cumulative replay a level-L example is trained on in stages L..num_stages,
+    i.e. (num_stages+1-L) times as often as a level-num_stages example -- a 5:4:3:2:1
+    weighting that is easy to mistake for a curriculum effect. Repeating each example
+    that many times reproduces the exposure exactly in a SINGLE pass, so a single-stage
+    run on this dataset has the same per-level gradient budget (and, at equal epochs,
+    the same total step count) as the full staged pipeline.
+    """
+    indices = []
+    for i, x in enumerate(ds):
+        indices.extend([i] * (num_stages + 1 - _level_int(x)))
+    return ds.select(indices)
 
 
 def log_split_sizes(splits: MathSplits) -> str:

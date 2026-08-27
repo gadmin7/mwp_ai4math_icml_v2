@@ -14,7 +14,7 @@ import subprocess
 import torch
 from transformers import AutoTokenizer, DataCollatorForLanguageModeling, TrainerCallback, TrainingArguments
 
-from src.data import MathSplits, log_split_sizes, stage_slice
+from src.data import MathSplits, assign_stages, exposure_weighted, log_split_sizes, stage_slice
 from src.lora_schedule import BaselineSpec, get_baseline
 from src.train_stage import prepare_stage_model, stage_adapter_name
 
@@ -36,8 +36,24 @@ def _git_commit_hash() -> str:
 
 def dataset_for_stage(splits: MathSplits, baseline: BaselineSpec, stage: int) -> tuple:
     if baseline.num_stages == 1:
-        return splits.train, splits.val
+        train = exposure_weighted(splits.train) if baseline.exposure_weighted else splits.train
+        return train, splits.val
     return stage_slice(splits.train, stage, baseline.replay), stage_slice(splits.val, stage, baseline.replay)
+
+
+def partitioned_splits(splits: MathSplits, baseline: BaselineSpec, seed: int) -> MathSplits:
+    """Attach the `stage` column both train and val are sliced by.
+
+    Single-stage arms need no partition. The test split is never partitioned -- it is
+    untouched until evaluate.py.
+    """
+    if baseline.num_stages == 1:
+        return splits
+    return MathSplits(
+        train=assign_stages(splits.train, baseline.partition, seed, baseline.num_stages),
+        val=assign_stages(splits.val, baseline.partition, seed, baseline.num_stages),
+        test=splits.test,
+    )
 
 
 def make_tokenizer(base_model_id: str, token: str = None) -> AutoTokenizer:
@@ -199,6 +215,7 @@ tags: [mwp-v2, seqft, plrs, math-word-problems]
 - LoRA rank / alpha: {cfg.r} / {cfg.lora_alpha}  (scaling: {"alpha/sqrt(r), rsLoRA" if cfg.use_rslora else "alpha/r"})
 - Full rank schedule: {" -> ".join(str(x) for x in baseline.ranks)}
 - Replay (cumulative levels): {baseline.replay}
+- Stage partition: {baseline.partition}{" (exposure-weighted single pass)" if baseline.exposure_weighted else ""}
 - Cumulative train examples this stage: {train_size}
 - Validation split seed: {seed} (5% of train, stratified by level; test set never used for selection)
 - Code commit: {_git_commit_hash()}
@@ -234,6 +251,11 @@ def run_baseline(
 
     baseline = get_baseline(baseline_id)
     print(log_split_sizes(splits))
+    splits = partitioned_splits(splits, baseline, seed)
+    if baseline.num_stages > 1:
+        print(f"stage partition strategy: {baseline.partition}")
+    if baseline.exposure_weighted:
+        print("train set is exposure-weighted (each example repeated 6-level times)")
 
     tokenizer = make_tokenizer(base_model_id, token=hf_token)
     preprocess = make_preprocess_fn(tokenizer)
