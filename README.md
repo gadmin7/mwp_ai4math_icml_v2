@@ -138,8 +138,12 @@ more than this 1B model at r=256 strictly needs, but the extra memory bandwidth 
 the 40GB tier speeds up the generation-heavy eval tail; batch sizes below are tuned
 for this instance, halve them on the 40GB/16-vCPU tier):
 
+Full launch-to-teardown procedure — SSH key registration, instance settings, run order,
+pause/resume caveats — is in **[`cloud/RUNBOOK.md`](cloud/RUNBOOK.md)**.
+
 ```bash
 bash cloud/jarvislabs_setup.sh
+source ~/mwp-venv/bin/activate
 export HF_TOKEN=$(hf auth token)
 python scripts/run_baseline.py --config configs/baseline1.yaml   # cheapest, run first
 python scripts/run_baseline.py --config configs/baseline2.yaml
