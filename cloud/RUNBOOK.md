@@ -112,11 +112,23 @@ cd /home/mwp_ai4math_icml_v2 && mkdir -p runs
 
 > Paths are under `/home`, not `~`, deliberately — see §7.
 
-Run each arm in its own tmux session, so a dropped SSH connection can't kill it:
+**Run everything, in order, in one tmux session** (recommended — this is a 15–20 h job
+you shouldn't have to babysit):
+
+```bash
+tmux new -s mwp 'bash scripts/run_all.sh 2>&1 | tee runs/run_all.log'
+# detach: Ctrl-b then d      reattach: tmux attach -t mwp      list: tmux ls
+```
+
+`run_all.sh` runs the arms sequentially in the order below, logs each to `runs/bN.log`,
+times each one, and records any failure in `runs/failures.txt` **without aborting the
+rest** — losing twelve arms because arm three hit a transient Hub error would be worse
+than finishing and retrying that one. Override the order with `ORDER="6 7 8"`.
+
+Or drive a single arm yourself:
 
 ```bash
 tmux new -s b9 'python3 scripts/run_baseline.py --config configs/baseline9.yaml 2>&1 | tee runs/b9.log'
-# detach: Ctrl-b then d      reattach: tmux attach -t b9      list: tmux ls
 ```
 
 **Recommended order** — cheap/decisive arms first, so a problem surfaces before the
