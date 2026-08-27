@@ -17,8 +17,44 @@ fixing two bugs found in that repo's notebooks:
    the test set is only ever touched once, by [`src/evaluate.py`](src/evaluate.py),
    after training is fully done.
 
-Scope of this pass: **LLaMA-3.2-1B, all 6 baselines**. 3B/Qwen backbones are a follow-up
-once this is validated (see the plan this repo was built from).
+Scope of this pass: **LLaMA-3.2-1B**. 3B/Qwen backbones are a follow-up once this is
+validated (see the plan this repo was built from).
+
+## Baseline arms
+
+`b1`–`b6` reproduce the paper's configurations. `b7`–`b10` are controls the original
+study lacks, defined in [`src/lora_schedule.py`](src/lora_schedule.py):
+
+| id | schedule | replay | cumulative trainable | purpose |
+|----|----------|--------|----------------------|---------|
+| b1 | 32 | – | 22.5M | direct baseline |
+| b2 | 32×5 | no | 112.7M | sequential, no replay |
+| b3 | 256→16 | no | 349.4M | SNR + PLRS |
+| b4 | 32×5 | yes | 112.7M | full replay, fixed rank |
+| b5 | 256→16 | yes | 349.4M | SFR + PLRS |
+| b6 | 256→128→64→32→32 | yes | 360.7M | **paper's final recipe** |
+| b7 | 32→64→96→128→128 | yes | 315.6M (87.5% of b6) | **expanding** rank |
+| b8 | 102×5 | yes | 359.3M (99.6% of b6) | **constant** rank |
+| b9 | 256 (single pass) | – | 180.4M | Table 2's heavy baseline |
+| b10 | 256 + rsLoRA | – | 180.4M | same, `alpha/√r` scaling |
+
+**Why b7/b8.** No arm in b1–b6 *expands*, so "shrinking helps" is never tested against
+its opposite; and b4-vs-b6 confounds schedule *shape* with total capacity (b6 has ~3×
+the trainable parameters). b7/b8 hold cumulative capacity roughly fixed against b6 so
+only the shape differs. Motivation: cumulative training data grows 13.3× across stages
+(536→7124) while b6's rank shrinks 8×, so capacity per example falls ~106× — even as
+each stage introduces harder, previously unseen material. The paper's single largest
+ablation gain also came from shrinking *less* at the final stage (+3.10 EM).
+
+Note too that PLRS was motivated as preventing "overwriting of parameters learned in
+earlier levels" — but with adapter stacking implemented correctly, earlier adapters are
+frozen and *cannot* be overwritten. Much of the original rationale for shrinking was
+compensating for the bug described above.
+
+**Why b9/b10.** The paper reads "single-pass r=256 underperforms r=32" as evidence that
+capacity *scheduling* rather than rank budget drives the gains. But `alpha/r` scaling is
+known to under-serve large ranks: at r=256 the effective gain is 2.0, versus 32.0 under
+rank-stabilized scaling. b9 vs b10 tests whether that result is a scaling artifact.
 
 ## Layout
 

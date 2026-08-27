@@ -196,7 +196,8 @@ tags: [mwp-v2, seqft, plrs, math-word-problems]
 ---
 # {baseline.id} stage {stage} -- {baseline.name}
 
-- LoRA rank / alpha: {cfg.r} / {cfg.lora_alpha}
+- LoRA rank / alpha: {cfg.r} / {cfg.lora_alpha}  (scaling: {"alpha/sqrt(r), rsLoRA" if cfg.use_rslora else "alpha/r"})
+- Full rank schedule: {" -> ".join(str(x) for x in baseline.ranks)}
 - Replay (cumulative levels): {baseline.replay}
 - Cumulative train examples this stage: {train_size}
 - Validation split seed: {seed} (5% of train, stratified by level; test set never used for selection)

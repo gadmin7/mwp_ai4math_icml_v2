@@ -38,7 +38,7 @@ def _bnb_config() -> BitsAndBytesConfig:
     )
 
 
-def _lora_config(r: int, lora_alpha: int) -> LoraConfig:
+def _lora_config(r: int, lora_alpha: int, use_rslora: bool = False) -> LoraConfig:
     return LoraConfig(
         r=r,
         lora_alpha=lora_alpha,
@@ -46,6 +46,7 @@ def _lora_config(r: int, lora_alpha: int) -> LoraConfig:
         target_modules=TARGET_MODULES,
         bias="none",
         task_type="CAUSAL_LM",
+        use_rslora=use_rslora,
     )
 
 
@@ -75,7 +76,7 @@ def prepare_stage_model(
                 prior stage's adapter is loaded from `prev_adapter_path` first.
     """
     cfg = baseline.stage_config(stage)
-    lora_cfg = _lora_config(cfg.r, cfg.lora_alpha)
+    lora_cfg = _lora_config(cfg.r, cfg.lora_alpha, cfg.use_rslora)
     adapter_name = stage_adapter_name(stage)
 
     if stage == 1:
