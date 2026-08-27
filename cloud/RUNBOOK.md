@@ -75,9 +75,11 @@ It clones the repo, builds a venv **under `$HOME`** (see §7), installs requirem
 prompts for `hf auth login`, and then runs both verification passes — the smoke test
 and a full end-to-end dry run — *before* you spend money on a real job.
 
-Llama-3.2-1B-Instruct is **gated**: request access once at
-<https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct>, and use a token with read
-access to gated repos plus write access (checkpoints push to `GT1999/*`).
+Llama-3.2-1B-Instruct is **gated**. The `GT1999` account already has access, so
+`hf auth login` on the box with a token that carries read access to gated repos plus
+write access (checkpoints push to `GT1999/*`) is all that's needed. If you generate a
+*new* fine-grained token for the instance, make sure both boxes are ticked — a
+read-only token fails at the first push, i.e. only after a stage has finished training.
 
 ---
 

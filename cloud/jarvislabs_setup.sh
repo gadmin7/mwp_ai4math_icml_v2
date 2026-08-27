@@ -47,14 +47,28 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 cat <<'NOTE'
 
 == huggingface auth ==
-Llama-3.2-1B-Instruct is a gated model: request access once at
-https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct and use a token with
-read access to gated repos + write access (checkpoints are pushed to GT1999/*).
+Use a token with read access to gated repos (Llama-3.2-1B-Instruct) AND write access
+(checkpoints are pushed to GT1999/*). A read-only token fails at the first push --
+i.e. only after a stage has already finished training.
 
   hf auth login
 
 NOTE
 read -r -p "Press enter once 'hf auth login' has completed..."
+
+echo "== verifying HF access before spending GPU time =="
+python3 - <<'PYEOF'
+from huggingface_hub import HfApi, hf_hub_download
+api = HfApi()
+print(f"  account: {api.whoami().get('name')}")
+hf_hub_download("meta-llama/Llama-3.2-1B-Instruct", "config.json")
+print("  gated model read: OK")
+# Round-trip a throwaway repo so a read-only token fails HERE, not after training.
+repo = f"{api.whoami().get('name')}/mwp-v2-authcheck"
+api.create_repo(repo, private=True, exist_ok=True)
+api.delete_repo(repo)
+print("  write access: OK")
+PYEOF
 
 echo "== verification: smoke test on real CUDA + bitsandbytes =="
 python3 scripts/smoke_test.py --skip-data
