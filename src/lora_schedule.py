@@ -173,6 +173,28 @@ BASELINES = {
         replay=True, num_stages=5, ranks=[256, 128, 64, 32, 32],
         early_stopping_patience=5,
     ),
+    # --- Rank sweep: are ALL the ranks above the optimum? -----------------------
+    # The training set is ~1.41M tokens (7124 examples x ~197 tokens). Trainable
+    # parameters per rank are 704,512, so params-per-token runs:
+    #   r=4 -> 2.0   r=8 -> 4.0   r=16 -> 8.0   r=32 -> 16.0   r=256 -> 128.3
+    # Every rank run so far sits below ONE token per trainable parameter (compute-
+    # optimal pretraining is ~20 tokens/param), i.e. deep in the over-parameterised
+    # regime -- and the one clean comparison agrees: b1 (r=32) 13.96% beat b9 (r=256)
+    # 10.58%. If the optimum is near r=8, then b6/b7/b8 compared schedule shapes
+    # entirely above it, which would explain why they were indistinguishable.
+    # These are single-pass, directly comparable to b1 (r=32) and b9 (r=256).
+    "b15": BaselineSpec(
+        id="b15", name="Direct baseline, single pass r=4",
+        replay=False, num_stages=1, ranks=[4],
+    ),
+    "b16": BaselineSpec(
+        id="b16", name="Direct baseline, single pass r=8",
+        replay=False, num_stages=1, ranks=[8],
+    ),
+    "b17": BaselineSpec(
+        id="b17", name="Direct baseline, single pass r=16",
+        replay=False, num_stages=1, ranks=[16],
+    ),
 }
 
 

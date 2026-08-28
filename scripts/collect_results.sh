@@ -18,7 +18,9 @@ cd "$REPO_DIR" || { echo "REPO_DIR not found: $REPO_DIR" >&2; exit 1; }
 STAMP=$(date +%Y%m%d-%H%M)
 OUT_DIR="${OUT_DIR:-/home}"
 OUT="${OUT_DIR}/mwp-results-${STAMP}.tar.gz"
-MANIFEST="checkpoint-manifest.txt"
+# Deliberately NOT named checkpoint-*: the tar excludes Trainer's checkpoint-<step>
+# directories, and a "checkpoint-manifest.txt" was silently swallowed by that glob.
+MANIFEST="hub-manifest.txt"
 mkdir -p "$OUT_DIR" || { echo "cannot create OUT_DIR: $OUT_DIR" >&2; exit 1; }
 
 {
@@ -57,7 +59,7 @@ if ! tar -czf "$OUT" \
   --exclude='*.safetensors' \
   --exclude='*.bin' \
   --exclude='__pycache__' \
-  --exclude='checkpoint-*' \
+  --exclude='checkpoint-[0-9]*' \
   "${TARGETS[@]}"; then
   echo "ARCHIVE FAILED -- do not delete the instance" >&2
   exit 1
