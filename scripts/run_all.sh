@@ -20,6 +20,12 @@ set -uo pipefail
 
 ORDER="${ORDER:-9 10 1 2 6 7 8 11 12 13 3 4 5}"
 REPO_DIR="${REPO_DIR:-/home/mwp_ai4math_icml_v2}"
+# configs/*.yaml carry batch_size 32, sized for an 80GB card. Override for a smaller
+# GPU without editing 13 configs:  BATCH_SIZE=16 (40GB)  BATCH_SIZE=8 (24GB).
+BATCH_SIZE="${BATCH_SIZE:-}"
+
+BATCH_ARG=()
+[ -n "$BATCH_SIZE" ] && BATCH_ARG=(--batch-size "$BATCH_SIZE")
 
 # Fatal on purpose: `set -e` is deliberately off (so one failing arm doesn't abort the
 # rest), which means an unchecked cd would silently run everything from the wrong place.
@@ -44,7 +50,9 @@ for b in $ORDER; do
   echo "=================================================================="
   started=$(date +%s)
 
-  if python3 scripts/run_baseline.py --config "$cfg" 2>&1 | tee "runs/b${b}.log"; then
+  # ${x[@]+"${x[@]}"} expands to nothing when the array is empty; a bare "${x[@]}"
+  # trips `set -u` as an unbound variable on bash < 4.4.
+  if python3 scripts/run_baseline.py --config "$cfg" ${BATCH_ARG[@]+"${BATCH_ARG[@]}"} 2>&1 | tee "runs/b${b}.log"; then
     status="ok"
   else
     status="FAILED"
