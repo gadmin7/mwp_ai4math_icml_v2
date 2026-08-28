@@ -163,8 +163,14 @@ Sanity checks worth watching for in the log:
   *"no eval improvement recorded"*, the stage never improved and kept its final weights
 - `pushed GT1999/mwp-v2-llama1b-bN-stageM` per stage
 
-If VRAM runs tight, drop `--batch-size` (e.g. `--batch-size 16`); nothing else needs
+If VRAM runs tight, drop `--batch-size` (e.g. `--batch-size 4`); nothing else needs
 changing.
+
+> **On batch size.** Peak memory here is dominated by the **output logits**, not the
+> model weights: Llama-3.2's vocab is 128,256 tokens, so one logits tensor is
+> `batch × 1024 × 128256 × 4B` — 16.8 GB at batch 32, which OOMs an 80 GB card once you
+> add its gradient and the activations. Batch 8 lands near 19 GB total. The 1B parameter
+> count is misleading; size the batch from the vocab, not the weights.
 
 ---
 

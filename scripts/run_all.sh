@@ -20,8 +20,9 @@ set -uo pipefail
 
 ORDER="${ORDER:-9 10 1 2 6 7 8 11 12 13 3 4 5}"
 REPO_DIR="${REPO_DIR:-/home/mwp_ai4math_icml_v2}"
-# configs/*.yaml carry batch_size 32, sized for an 80GB card. Override for a smaller
-# GPU without editing 13 configs:  BATCH_SIZE=16 (40GB)  BATCH_SIZE=8 (24GB).
+# configs/*.yaml carry batch_size 8 (~19GB peak: the logits tensor
+# batch*seq*128256 dominates, not the 1B of weights). Override without editing 13
+# configs, e.g. BATCH_SIZE=4 on a 24GB card.
 BATCH_SIZE="${BATCH_SIZE:-}"
 
 BATCH_ARG=()
