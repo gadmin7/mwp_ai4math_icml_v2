@@ -199,7 +199,9 @@ def stage_sources(
     Prefers local (already on disk from training, so no re-download); falls back to the
     Hub per stage, which also lets you evaluate an arm trained on a different machine.
     """
-    last = through_stage or baseline.num_stages
+    # Explicit None check, not `or`: through_stage=0 means "no adapters at all"
+    # (zero-shot base model), and `0 or num_stages` would silently load everything.
+    last = baseline.num_stages if through_stage is None else through_stage
     sources = []
     for stage in range(1, last + 1):
         local = None
@@ -236,6 +238,12 @@ def load_stacked_model(
         token=token,
     )
     sources = stage_sources(baseline, hf_org, model_tag, local_dir, through_stage)
+    if not sources:
+        # through_stage=0: the untrained base model, giving the zero-shot reference
+        # point b_j that forward-transfer is measured against.
+        print("  no adapters (zero-shot base model)")
+        base_model.eval()
+        return base_model
     for i, src in enumerate(sources):
         print(f"  stage {i + 1} adapter <- {src}")
 

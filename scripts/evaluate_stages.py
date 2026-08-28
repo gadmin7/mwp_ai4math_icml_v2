@@ -54,6 +54,7 @@ def main():
     if baseline.num_stages == 1:
         raise SystemExit(f"{baseline.id} is single-stage; nothing intermediate to evaluate")
 
+    # stage 0 is legal and means "no adapters": the zero-shot base model.
     stages = ([int(s) for s in args.stages.split(",")] if args.stages
               else list(range(1, baseline.num_stages)))
 
