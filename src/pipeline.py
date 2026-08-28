@@ -216,6 +216,7 @@ tags: [mwp-v2, seqft, plrs, math-word-problems]
 - Full rank schedule: {" -> ".join(str(x) for x in baseline.ranks)}
 - Replay (cumulative levels): {baseline.replay}
 - Stage partition: {baseline.partition}{" (exposure-weighted single pass)" if baseline.exposure_weighted else ""}
+- Early stopping patience: {baseline.early_stopping_patience}
 - Cumulative train examples this stage: {train_size}
 - Validation split seed: {seed} (5% of train, stratified by level; test set never used for selection)
 - Code commit: {_git_commit_hash()}
@@ -264,7 +265,8 @@ def run_baseline(
     model = None
     all_log_history = {}
     for stage in range(1, baseline.num_stages + 1):
-        print(f"\n=== {baseline_id} stage {stage}/{baseline.num_stages} ===")
+        print(f"\n=== {baseline_id} stage {stage}/{baseline.num_stages} "
+              f"(patience={baseline.early_stopping_patience}) ===")
         train_raw, val_raw = dataset_for_stage(splits, baseline, stage)
         train_tok = train_raw.map(preprocess, batched=True, num_proc=map_num_proc)
         val_tok = val_raw.map(preprocess, batched=True, num_proc=map_num_proc)
@@ -298,7 +300,7 @@ def run_baseline(
             eval_dataset=val_tok,
             args=training_args,
             data_collator=collator,
-            callbacks=[BestAdapterCallback(model, patience=EARLY_STOPPING_PATIENCE)],
+            callbacks=[BestAdapterCallback(model, patience=baseline.early_stopping_patience)],
         )
         trainer.train()
         all_log_history[f"stage_{stage}"] = trainer.state.log_history

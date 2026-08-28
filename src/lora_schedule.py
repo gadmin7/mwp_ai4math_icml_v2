@@ -36,6 +36,13 @@ class BaselineSpec:
     # Single-pass arm that reproduces cumulative replay's 5:4:3:2:1 per-level exposure
     # by duplication, to test whether staging adds anything over reweighting alone.
     exposure_weighted: bool = False
+    # Evals without improvement before a stage stops. The paper's value is 2, but at
+    # eval_steps=150 that kills a stage after only 300 flat steps -- and a staged arm
+    # gets one such chance PER STAGE. Measured: b6/b7 stage 5 stopped at 1200/600 steps
+    # against b1's 1950 on the same data, i.e. the staged arms were trained less at the
+    # decisive stage. Since lr x steps is roughly constant for a target loss (Marek et
+    # al. 2026), those arms are undertrained rather than converged. See b14.
+    early_stopping_patience: int = 2
 
     def stage_config(self, stage: int) -> LoraStageConfig:
         r = self.ranks[stage - 1]
@@ -153,6 +160,18 @@ BASELINES = {
     "b13": BaselineSpec(
         id="b13", name="Single pass, exposure-weighted 5:4:3:2:1, r=102",
         replay=False, num_stages=1, ranks=[102], exposure_weighted=True,
+    ),
+    # --- Is the staged null result just truncation? -----------------------------
+    # Identical to b6 except patience=5. b6 matched the single-pass baseline (13.54 vs
+    # 13.96) while ALSO ending at a worse validation loss (0.7343 vs 0.7139), which is
+    # consistent with two different stories: staging genuinely does not help, or the
+    # staged arms were cut short by patience=2 firing five times. b14 separates them --
+    # if it climbs materially over b6, every staged arm needs rerunning at higher
+    # patience and the null result is an artifact.
+    "b14": BaselineSpec(
+        id="b14", name="b6 schedule with patience=5 (truncation control)",
+        replay=True, num_stages=5, ranks=[256, 128, 64, 32, 32],
+        early_stopping_patience=5,
     ),
 }
 
