@@ -7,6 +7,7 @@ experiment_notebooks/evaluations/exact_match_accuracy.ipynb in the original repo
 so results stay comparable to the paper's methodology.
 """
 
+import os
 import re
 
 import pandas as pd
@@ -189,13 +190,36 @@ def _bnb_config():
     )
 
 
+def stage_sources(
+    baseline: BaselineSpec, hf_org: str, model_tag: str, local_dir: str = None,
+) -> list:
+    """Where each stage's adapter lives: local checkpoint dirs if available, else the Hub.
+
+    Prefers local (already on disk from training, so no re-download); falls back to the
+    Hub per stage, which also lets you evaluate an arm trained on a different machine.
+    """
+    sources = []
+    for stage in range(1, baseline.num_stages + 1):
+        local = None
+        if local_dir:
+            candidate = os.path.join(
+                local_dir, f"{baseline.id}-stage{stage}", stage_adapter_name(stage)
+            )
+            if os.path.isdir(candidate):
+                local = candidate
+        sources.append(local or repo_name(hf_org, model_tag, baseline.id, stage))
+    return sources
+
+
 def load_stacked_model(
     base_model_id: str, baseline: BaselineSpec, hf_org: str, model_tag: str,
-    quantize: bool = True, token: str = None,
+    quantize: bool = True, token: str = None, local_dir: str = None,
 ):
-    """Load every trained stage's adapter and activate them all together --
-    the model state this evaluation script scores must reflect the full
-    frozen-stack-plus-final-stage, not any single stage in isolation.
+    """Load every trained stage's adapter and activate them all together.
+
+    The evaluated model must reflect the full frozen stack plus the final stage, not
+    any single stage in isolation -- activating only the last adapter would score a
+    model that was never trained in that configuration.
     """
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_id,
@@ -203,14 +227,23 @@ def load_stacked_model(
         device_map="auto" if quantize else None,
         token=token,
     )
-    stage1_repo = repo_name(hf_org, model_tag, baseline.id, 1)
-    model = PeftModel.from_pretrained(base_model, stage1_repo, adapter_name=stage_adapter_name(1), token=token)
-    for stage in range(2, baseline.num_stages + 1):
-        repo = repo_name(hf_org, model_tag, baseline.id, stage)
-        model.load_adapter(repo, adapter_name=stage_adapter_name(stage), token=token)
+    sources = stage_sources(baseline, hf_org, model_tag, local_dir)
+    for i, src in enumerate(sources):
+        print(f"  stage {i + 1} adapter <- {src}")
+
+    model = PeftModel.from_pretrained(
+        base_model, sources[0], adapter_name=stage_adapter_name(1), token=token
+    )
+    for stage, src in enumerate(sources[1:], start=2):
+        model.load_adapter(src, adapter_name=stage_adapter_name(stage), token=token)
 
     all_adapters = [stage_adapter_name(s) for s in range(1, baseline.num_stages + 1)]
     model.base_model.set_adapter(all_adapters)
+    active = set(model.active_adapters)
+    assert active == set(all_adapters), (
+        f"expected all {len(all_adapters)} stage adapters active, got {sorted(active)}"
+    )
+    print(f"  active adapters: {sorted(active)}")
     model.eval()
     return model
 
@@ -259,10 +292,26 @@ def generate_predictions(
 
 def evaluate_baseline(
     baseline: BaselineSpec, base_model_id: str, hf_org: str, model_tag: str,
-    test_ds, quantize: bool = True, token: str = None, batch_size: int = 64, num_workers: int = 4,
+    test_ds, quantize: bool = True, token: str = None, batch_size: int = 64,
+    num_workers: int = 4, local_dir: str = None,
 ) -> pd.DataFrame:
-    model = load_stacked_model(base_model_id, baseline, hf_org, model_tag, quantize, token)
+    model = load_stacked_model(
+        base_model_id, baseline, hf_org, model_tag, quantize, token, local_dir
+    )
     from src.pipeline import make_tokenizer
     tokenizer = make_tokenizer(base_model_id, token=token)
     preds = generate_predictions(model, tokenizer, test_ds, batch_size=batch_size, num_workers=num_workers)
     return score(preds)
+
+
+def report(df: pd.DataFrame, label: str = "") -> str:
+    """Human-readable EM summary: overall, per level, and the box rate."""
+    lines = [f"=== {label} ===" if label else "==="]
+    lines.append(f"exact match (overall): {100 * accuracy(df):.2f}%   n={len(df)}")
+    lines.append(f"predictions containing \\boxed{{}}: {100 * box_rate(df):.1f}%")
+    lines.append("")
+    lines.append(f"{'level':<10}{'n':<8}{'EM %'}")
+    for _, row in accuracy_by_level(df).iterrows():
+        n = (df["level"] == row["level"]).sum()
+        lines.append(f"{row['level']:<10}{n:<8}{100 * row['accuracy']:.2f}")
+    return "\n".join(lines)
