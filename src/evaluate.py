@@ -192,14 +192,16 @@ def _bnb_config():
 
 def stage_sources(
     baseline: BaselineSpec, hf_org: str, model_tag: str, local_dir: str = None,
+    through_stage: int = None,
 ) -> list:
     """Where each stage's adapter lives: local checkpoint dirs if available, else the Hub.
 
     Prefers local (already on disk from training, so no re-download); falls back to the
     Hub per stage, which also lets you evaluate an arm trained on a different machine.
     """
+    last = through_stage or baseline.num_stages
     sources = []
-    for stage in range(1, baseline.num_stages + 1):
+    for stage in range(1, last + 1):
         local = None
         if local_dir:
             candidate = os.path.join(
@@ -214,12 +216,18 @@ def stage_sources(
 def load_stacked_model(
     base_model_id: str, baseline: BaselineSpec, hf_org: str, model_tag: str,
     quantize: bool = True, token: str = None, local_dir: str = None,
+    through_stage: int = None,
 ):
-    """Load every trained stage's adapter and activate them all together.
+    """Load stages 1..through_stage (default: all) and activate them together.
 
-    The evaluated model must reflect the full frozen stack plus the final stage, not
-    any single stage in isolation -- activating only the last adapter would score a
-    model that was never trained in that configuration.
+    The evaluated model must reflect the full frozen stack plus the newest stage, not
+    any single adapter in isolation -- activating only the last one would score a model
+    that was never trained in that configuration.
+
+    `through_stage` reconstructs an INTERMEDIATE model: stages 1..k as they stood after
+    stage k, before later stages existed. This is what makes retrospective forgetting
+    and error-trajectory analysis possible without retraining, and it only works because
+    each stage is kept as a separate frozen adapter.
     """
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_id,
@@ -227,7 +235,7 @@ def load_stacked_model(
         device_map="auto" if quantize else None,
         token=token,
     )
-    sources = stage_sources(baseline, hf_org, model_tag, local_dir)
+    sources = stage_sources(baseline, hf_org, model_tag, local_dir, through_stage)
     for i, src in enumerate(sources):
         print(f"  stage {i + 1} adapter <- {src}")
 
@@ -237,7 +245,7 @@ def load_stacked_model(
     for stage, src in enumerate(sources[1:], start=2):
         model.load_adapter(src, adapter_name=stage_adapter_name(stage), token=token)
 
-    all_adapters = [stage_adapter_name(s) for s in range(1, baseline.num_stages + 1)]
+    all_adapters = [stage_adapter_name(s) for s in range(1, len(sources) + 1)]
     model.base_model.set_adapter(all_adapters)
     active = set(model.active_adapters)
     assert active == set(all_adapters), (
@@ -293,10 +301,10 @@ def generate_predictions(
 def evaluate_baseline(
     baseline: BaselineSpec, base_model_id: str, hf_org: str, model_tag: str,
     test_ds, quantize: bool = True, token: str = None, batch_size: int = 64,
-    num_workers: int = 4, local_dir: str = None,
+    num_workers: int = 4, local_dir: str = None, through_stage: int = None,
 ) -> pd.DataFrame:
     model = load_stacked_model(
-        base_model_id, baseline, hf_org, model_tag, quantize, token, local_dir
+        base_model_id, baseline, hf_org, model_tag, quantize, token, local_dir, through_stage
     )
     from src.pipeline import make_tokenizer
     tokenizer = make_tokenizer(base_model_id, token=token)
