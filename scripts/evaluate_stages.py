@@ -37,9 +37,11 @@ from src.lora_schedule import get_baseline
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("--scope", choices=["level1", "cumulative"], default="level1",
+    parser.add_argument("--scope", choices=["level1", "cumulative", "all"], default="level1",
                         help="level1: only Level-1 problems (cheap forgetting curve). "
-                             "cumulative: all levels <= k (enables bucket analysis).")
+                             "cumulative: all levels <= k (enables bucket analysis). "
+                             "all: the entire test set regardless of stage -- needed for "
+                             "zero-shot (--stages 0), where 'levels <= 0' would be empty.")
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--out-dir", default="results")
     parser.add_argument("--batch-size", type=int, default=64)
@@ -64,8 +66,17 @@ def main():
 
     frames = []
     for k in stages:
-        subset = (splits.test.filter(lambda x: _level_int(x) == 1) if args.scope == "level1"
-                  else splits.test.filter(lambda x: _level_int(x) <= k))
+        if args.scope == "level1":
+            subset = splits.test.filter(lambda x: _level_int(x) == 1)
+        elif args.scope == "all":
+            subset = splits.test
+        else:
+            subset = splits.test.filter(lambda x: _level_int(x) <= k)
+        if len(subset) == 0:
+            raise SystemExit(
+                f"empty evaluation set for stage {k} with --scope {args.scope}; "
+                "use --scope all for zero-shot (stage 0)"
+            )
         print(f"\n=== {baseline.id} @ stage {k}/{baseline.num_stages} "
               f"({args.scope}, n={len(subset)}) ===")
 
