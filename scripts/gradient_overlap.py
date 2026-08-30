@@ -42,7 +42,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data import _level_int, load_math_splits
-from src.pipeline import PROMPT_TEMPLATE
+from src.prompts import PROMPT_TEMPLATE
 
 TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
 
