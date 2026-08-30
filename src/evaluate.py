@@ -18,7 +18,7 @@ from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from tqdm import tqdm
 
 from src.lora_schedule import BaselineSpec
-from src.pipeline import PROMPT_TEMPLATE, repo_name
+from src.pipeline import PROMPT_TEMPLATE, PROMPT_TEMPLATES, repo_name
 from src.train_stage import stage_adapter_name
 
 # ---------------------------------------------------------------------------
@@ -174,6 +174,27 @@ def box_rate(df: pd.DataFrame) -> float:
     return df["predicted_solution"].str.contains("boxed", regex=False).mean()
 
 
+def step_markers(df: pd.DataFrame) -> float:
+    """Mean '## Step N' markers per generation -- the chain-of-thought scaffold.
+
+    Zero-shot averages 7.18; fine-tuning on MATH reference solutions drove it to 0.00
+    while EM fell 19.88 -> 13.96. For an autoregressive model the written steps ARE the
+    computation, so this collapsing is an early warning that reasoning is being removed.
+    """
+    return df["predicted_solution"].astype(str).str.count(r"##\s*Step|Step \d").mean()
+
+
+def repetition(df: pd.DataFrame, n: int = 12) -> float:
+    """1 - unique/total n-grams. Zero-shot 0.018; fine-tuned 0.248 (40% degenerate)."""
+    def r(s):
+        w = str(s).split()
+        if len(w) <= n:
+            return 0.0
+        g = [" ".join(w[i:i + n]) for i in range(len(w) - n + 1)]
+        return 1 - len(set(g)) / len(g)
+    return df["predicted_solution"].apply(r).mean()
+
+
 def accuracy_by_level(df: pd.DataFrame) -> pd.DataFrame:
     return df.groupby("level")["correct"].mean().reset_index(name="accuracy")
 
@@ -266,6 +287,7 @@ def load_stacked_model(
 
 def generate_predictions(
     model, tokenizer, test_ds, batch_size: int = 64, max_new_tokens: int = 512, num_workers: int = 4,
+    prompt_template: str = None,
 ) -> pd.DataFrame:
     """batch_size/num_workers default to values tuned for an 80GB-class GPU with
     ~28 vCPUs (JarvisLabs A100 80GB tier); drop batch_size to 32 and num_workers
@@ -273,7 +295,7 @@ def generate_predictions(
     """
     samples = [
         {
-            "input_text": PROMPT_TEMPLATE.format(problem=x["problem"], solution=""),
+            "input_text": (prompt_template or PROMPT_TEMPLATE).format(problem=x["problem"], solution=""),
             "problem": x["problem"],
             "level": x["level"],
             "type": x["type"],
@@ -310,13 +332,18 @@ def evaluate_baseline(
     baseline: BaselineSpec, base_model_id: str, hf_org: str, model_tag: str,
     test_ds, quantize: bool = True, token: str = None, batch_size: int = 64,
     num_workers: int = 4, local_dir: str = None, through_stage: int = None,
+    prompt: str = "default",
 ) -> pd.DataFrame:
     model = load_stacked_model(
         base_model_id, baseline, hf_org, model_tag, quantize, token, local_dir, through_stage
     )
     from src.pipeline import make_tokenizer
     tokenizer = make_tokenizer(base_model_id, token=token)
-    preds = generate_predictions(model, tokenizer, test_ds, batch_size=batch_size, num_workers=num_workers)
+    if prompt not in PROMPT_TEMPLATES:
+        raise ValueError(f"unknown prompt {prompt!r}; choose from {list(PROMPT_TEMPLATES)}")
+    print(f"  prompt template: {prompt}")
+    preds = generate_predictions(model, tokenizer, test_ds, batch_size=batch_size,
+                                 num_workers=num_workers, prompt_template=PROMPT_TEMPLATES[prompt])
     return score(preds)
 
 
@@ -325,6 +352,8 @@ def report(df: pd.DataFrame, label: str = "") -> str:
     lines = [f"=== {label} ===" if label else "==="]
     lines.append(f"exact match (overall): {100 * accuracy(df):.2f}%   n={len(df)}")
     lines.append(f"predictions containing \\boxed{{}}: {100 * box_rate(df):.1f}%")
+    lines.append(f"step markers per generation: {step_markers(df):.2f}   (zero-shot ref: 7.18)")
+    lines.append(f"repetition ratio (12-gram): {repetition(df):.3f}   (zero-shot ref: 0.018)")
     lines.append("")
     lines.append(f"{'level':<10}{'n':<8}{'EM %'}")
     for _, row in accuracy_by_level(df).iterrows():

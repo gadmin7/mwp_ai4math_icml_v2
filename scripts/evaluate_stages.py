@@ -45,6 +45,10 @@ def main():
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--out-dir", default="results")
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--prompt", choices=["default", "cot"], default="default",
+                        help="cot: explicitly request the '## Step N' scaffold the "
+                             "instruct model uses zero-shot, to test whether fine-tuning "
+                             "merely overwrote the default answering format")
     parser.add_argument("--stages", default=None,
                         help="comma-separated stages to evaluate (default: all but the "
                              "last, which scripts/evaluate.py already covers)")
@@ -90,10 +94,11 @@ def main():
             token=os.environ.get("HF_TOKEN"),
             batch_size=args.batch_size,
             local_dir=local_dir,
+            prompt=args.prompt,
             through_stage=k,          # <-- adapters 1..k only
         )
         df["stage"] = k
-        df.to_csv(os.path.join(args.out_dir, f"{baseline.id}-stage{k}-{args.scope}-predictions.csv"),
+        df.to_csv(os.path.join(args.out_dir, f"{baseline.id}-stage{k}-{args.scope}{'' if args.prompt=='default' else '-'+args.prompt}-predictions.csv"),
                   index=False)
         frames.append(df)
         print(f"  stage {k}: EM {100 * accuracy(df):.2f}%  box {100 * box_rate(df):.1f}%")

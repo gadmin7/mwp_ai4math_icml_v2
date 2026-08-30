@@ -35,6 +35,10 @@ def main():
     parser.add_argument("--runs-dir", default="runs", help="where training wrote checkpoints")
     parser.add_argument("--out-dir", default="results")
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--prompt", choices=["default", "cot"], default="default",
+                        help="cot: explicitly request the '## Step N' scaffold the "
+                             "instruct model uses zero-shot, to test whether fine-tuning "
+                             "merely overwrote the default answering format")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--limit", type=int, default=None,
                         help="evaluate only the first N test problems (sanity check)")
@@ -67,10 +71,11 @@ def main():
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         local_dir=local_dir,
+        prompt=args.prompt,
     )
 
     os.makedirs(args.out_dir, exist_ok=True)
-    suffix = f"-limit{args.limit}" if args.limit else ""
+    suffix = (f"-limit{args.limit}" if args.limit else "") + ("" if args.prompt == "default" else f"-{args.prompt}")
     out_csv = os.path.join(args.out_dir, f"{baseline.id}{suffix}-test-predictions.csv")
     df.to_csv(out_csv, index=False)
 
