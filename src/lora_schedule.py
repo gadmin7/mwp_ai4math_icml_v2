@@ -43,6 +43,10 @@ class BaselineSpec:
     # decisive stage. Since lr x steps is roughly constant for a target loss (Marek et
     # al. 2026), those arms are undertrained rather than converged. See b14.
     early_stopping_patience: int = 2
+    # Epochs PER STAGE. Set explicitly on the staged/joint arms so all three see the
+    # same number of example-passes -- otherwise the comparison measures compute, not
+    # schedule. See CURRICULUM ARMS below for the arithmetic.
+    num_epochs: int = 5
 
     def stage_config(self, stage: int) -> LoraStageConfig:
         r = self.ranks[stage - 1]
@@ -194,6 +198,35 @@ BASELINES = {
     "b17": BaselineSpec(
         id="b17", name="Direct baseline, single pass r=16",
         replay=False, num_stages=1, ranks=[16],
+    ),
+    # --- CURRICULUM ARMS: does moving through complexity IN STEPS help? -----------
+    # The hypothesis, minimally: is staged training better than training on everything
+    # at once? Two arms would conflate ORDER with EXPOSURE -- under cumulative replay
+    # level 1 is seen 5x as often as level 5, so a staged win could be reweighting
+    # rather than curriculum. Three arms separate them:
+    #
+    #   staged vs jointw  -> isolates ORDER    (exposure matched)
+    #   jointw vs jointu  -> isolates EXPOSURE (no ordering in either)
+    #
+    # Compute is matched by construction. The exposure-weighted set has exactly
+    # sum(cumulative sizes) = 17,741 examples, so:
+    #   staged  5 stages x 2 epochs over cumulative  = 35,482 example-passes
+    #   jointw  2 epochs over the 17,741 weighted set = 35,482   (exact)
+    #   jointu  5 epochs over the 7,124 full set      = 35,620   (+0.4%)
+    #
+    # Rank is constant: PLRS's schedule is a separate question, and varying it here
+    # would reintroduce the confound this design exists to remove.
+    "staged": BaselineSpec(
+        id="staged", name="Curriculum: L1 -> L1,2 -> ... -> L1..5 (constant rank)",
+        replay=True, num_stages=5, ranks=[32] * 5, num_epochs=2,
+    ),
+    "jointw": BaselineSpec(
+        id="jointw", name="Joint, exposure-weighted 5:4:3:2:1 (order removed, exposure kept)",
+        replay=False, num_stages=1, ranks=[32], exposure_weighted=True, num_epochs=2,
+    ),
+    "jointu": BaselineSpec(
+        id="jointu", name="Joint, uniform (order and exposure both removed)",
+        replay=False, num_stages=1, ranks=[32], num_epochs=5,
     ),
 }
 

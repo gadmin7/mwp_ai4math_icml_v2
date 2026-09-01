@@ -52,9 +52,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", default="b6", choices=sorted(BASELINES))
     parser.add_argument("--n-per-level", type=int, default=60)
+    parser.add_argument("--prompt", default=None,
+                        help="override; otherwise read from configs/<arm>.yaml")
     args = parser.parse_args()
 
     spec = get_baseline(args.baseline)
+    # Read the prompt from the real config so the dry run exercises the shipping path
+    # (base-model arms use 'plain'; the chat template would be wrong for them).
+    prompt = args.prompt
+    if prompt is None:
+        import glob, yaml as _y
+        for f in glob.glob(f"configs/{args.baseline}.yaml") + glob.glob(f"configs/baseline*.yaml"):
+            c = _y.safe_load(open(f))
+            if c.get("baseline_id") == spec.id:
+                prompt = c.get("prompt", "default"); break
+    prompt = prompt or "default"
     splits = fake_splits(args.n_per_level)
     print(f"dry run: {spec.id} ({spec.name}), {spec.num_stages} stage(s), "
           f"train={len(splits.train)} val={len(splits.val)}")
@@ -74,6 +86,7 @@ def main():
             batch_size=4,
             dataloader_num_workers=0,
             map_num_proc=1,
+            prompt=prompt,
         )
 
         print("\n=== verifying on-disk checkpoints ===")

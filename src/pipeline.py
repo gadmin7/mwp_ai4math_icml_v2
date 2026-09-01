@@ -60,10 +60,10 @@ def make_tokenizer(base_model_id: str, token: str = None) -> AutoTokenizer:
     return tok
 
 
-def make_preprocess_fn(tokenizer, max_length: int = 1024):
+def make_preprocess_fn(tokenizer, max_length: int = 1024, template: str = None):
     def _fn(examples):
         texts = [
-            PROMPT_TEMPLATE.format(problem=p, solution=s)
+            (template or PROMPT_TEMPLATE).format(problem=p, solution=s)
             for p, s in zip(examples["problem"], examples["solution"])
         ]
         return tokenizer(texts, truncation=True, max_length=max_length)
@@ -146,6 +146,7 @@ class BestAdapterCallback(TrainerCallback):
 
 def build_training_args(
     output_dir: str, batch_size: int, n_train_examples: int, quantize: bool, dataloader_num_workers: int,
+    num_epochs: int = NUM_EPOCHS,
 ) -> TrainingArguments:
     """Construct TrainingArguments in a way that survives the transformers API churn.
 
@@ -161,7 +162,7 @@ def build_training_args(
         output_dir=output_dir,
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=1,
-        num_train_epochs=NUM_EPOCHS,
+        num_train_epochs=num_epochs,
         learning_rate=LEARNING_RATE,
         logging_steps=100,
         eval_steps=150,
@@ -184,7 +185,7 @@ def build_training_args(
         kwargs["warmup_ratio"] = WARMUP_RATIO
     else:
         steps_per_epoch = max(1, math.ceil(n_train_examples / batch_size))
-        kwargs["warmup_steps"] = max(1, int(WARMUP_RATIO * steps_per_epoch * NUM_EPOCHS))
+        kwargs["warmup_steps"] = max(1, int(WARMUP_RATIO * steps_per_epoch * num_epochs))
 
     if quantize:
         # 8-bit paged optimizer + fp16 only make sense on a real CUDA device.
@@ -235,6 +236,7 @@ def run_baseline(
     batch_size: int = 4,
     dataloader_num_workers: int = 8,
     map_num_proc: int = 8,
+    prompt: str = "default",
 ) -> dict:
     """dataloader_num_workers/map_num_proc default to 8 -- tuned for a ~28 vCPU
     instance (JarvisLabs A100 80GB tier); drop to 2-4 on a 16-vCPU box.
@@ -255,7 +257,8 @@ def run_baseline(
         print("train set is exposure-weighted (each example repeated 6-level times)")
 
     tokenizer = make_tokenizer(base_model_id, token=hf_token)
-    preprocess = make_preprocess_fn(tokenizer)
+    preprocess = make_preprocess_fn(tokenizer, template=PROMPT_TEMPLATES[prompt])
+    print(f"prompt template: {prompt}")
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
     model = None
@@ -289,6 +292,7 @@ def run_baseline(
             n_train_examples=len(train_tok),
             quantize=quantize,
             dataloader_num_workers=dataloader_num_workers,
+            num_epochs=baseline.num_epochs,
         )
         trainer = Trainer(
             model=model,

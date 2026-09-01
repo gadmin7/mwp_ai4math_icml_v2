@@ -52,6 +52,7 @@ def main():
         batch_size=args.batch_size or cfg.get("batch_size", 4),
         dataloader_num_workers=args.dataloader_num_workers,
         map_num_proc=args.map_num_proc,
+        prompt=cfg.get("prompt", "default"),
     )
 
 
