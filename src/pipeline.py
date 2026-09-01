@@ -204,7 +204,7 @@ def build_training_args(
         gradient_accumulation_steps=1,
         num_train_epochs=num_epochs,
         learning_rate=LEARNING_RATE,
-        logging_steps=100,
+        logging_steps=25,   # grad_norm is logged here -- see max_grad_norm note below
         eval_steps=150,
         report_to="none",
         dataloader_num_workers=dataloader_num_workers,
@@ -234,7 +234,13 @@ def build_training_args(
     #   effective batch 16     -- prescribed; free via accumulation
     kwargs["gradient_accumulation_steps"] = 2
     kwargs["weight_decay"] = 0.01
-    kwargs["max_grad_norm"] = 0.3
+    # max_grad_norm is the one prescription that does NOT transfer out of QLoRA.
+    # 0.3 is QLoRA's value, chosen partly for stability under 4-bit quantisation
+    # noise; unquantised, clipping that aggressively mostly just slows learning.
+    # Use QLoRA's value where QLoRA's regime applies, the standard 1.0 otherwise.
+    # Watch the logged grad_norm: if it sits well below the threshold the choice
+    # never binds and is moot either way.
+    kwargs["max_grad_norm"] = 0.3 if quantize else 1.0
     if quantize:
         kwargs["fp16"] = True
         kwargs["optim"] = "paged_adamw_8bit"
