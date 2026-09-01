@@ -255,12 +255,20 @@ def load_stacked_model(
     and error-trajectory analysis possible without retraining, and it only works because
     each stage is kept as a separate frozen adapter.
     """
-    base_model = AutoModelForCausalLM.from_pretrained(
-        base_model_id,
-        quantization_config=_bnb_config() if quantize else None,
-        device_map="auto" if quantize else None,
-        token=token,
-    )
+    # device_map="auto" only applies in the quantised path. Without it an unquantised
+    # model stays on the CPU, and because this script calls model.generate() directly
+    # (rather than going through Trainer, which relocates the model itself) evaluation
+    # silently runs on CPU -- measured at 1687 s/batch versus ~16 s/batch on GPU.
+    if quantize:
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_id, quantization_config=_bnb_config(),
+            device_map="auto", token=token)
+    else:
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_id, dtype=torch.bfloat16, token=token)
+        base_model = base_model.to("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"  model device: {next(base_model.parameters()).device}, "
+          f"dtype: {next(base_model.parameters()).dtype}")
     sources = stage_sources(baseline, hf_org, model_tag, local_dir, through_stage)
     if not sources:
         # through_stage=0: the untrained base model, giving the zero-shot reference
