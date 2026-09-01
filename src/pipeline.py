@@ -227,12 +227,21 @@ def build_training_args(
         steps_per_epoch = max(1, math.ceil(n_train_examples / batch_size))
         kwargs["warmup_steps"] = max(1, int(WARMUP_RATIO * steps_per_epoch * num_epochs))
 
+    # Audit fixes (QLoRA / Unsloth prescriptions), applied to every arm:
+    #   bf16 over fp16 on A100 -- wider exponent range, more stable
+    #   weight_decay 0.01      -- was unset (0)
+    #   max_grad_norm 0.3      -- QLoRA's value; framework default is 1.0
+    #   effective batch 16     -- prescribed; free via accumulation
+    kwargs["gradient_accumulation_steps"] = 2
+    kwargs["weight_decay"] = 0.01
+    kwargs["max_grad_norm"] = 0.3
     if quantize:
-        # 8-bit paged optimizer + fp16 only make sense on a real CUDA device.
         kwargs["fp16"] = True
         kwargs["optim"] = "paged_adamw_8bit"
     else:
         kwargs["optim"] = "adamw_torch"
+        if torch.cuda.is_available():
+            kwargs["bf16"] = True
 
     unsupported = sorted(set(kwargs) - supported)
     if unsupported:

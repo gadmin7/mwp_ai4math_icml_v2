@@ -3,7 +3,9 @@ base_model_id: meta-llama/Llama-3.2-1B
 model_tag: llama1b-base
 hf_org: GT1999
 push_to_hub: true
-quantize: true
+# No quantisation: a 1B model is 2.5GB in bf16 on an 80GB A100. Removes quantisation
+# noise and keeps base-weight gradients available for analysis.
+quantize: false
 # BASE model: the chat template is meaningless to it (never trained on those tokens),
 # so its loss would swamp the maths signal. See src/prompts.py.
 prompt: plain

@@ -8,7 +8,10 @@ because nothing forced the six copies to agree. Every baseline is defined once h
 from dataclasses import dataclass, field
 
 TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-LORA_DROPOUT = 0.2
+# 0.05, not the original 0.2: QLoRA searched {0, 0.05, 0.1} and Unsloth recommends
+# 0-0.1, both noting dropout is an unreliable regulariser for short runs. 0.2 was
+# outside every range either source examined.
+LORA_DROPOUT = 0.05
 
 
 @dataclass
@@ -224,16 +227,16 @@ BASELINES = {
     # Rank is constant: PLRS's schedule is a separate question, and varying it here
     # would reintroduce the confound this design exists to remove.
     "staged": BaselineSpec(
-        id="staged", name="Curriculum: L1 -> L1,2 -> ... -> L1..5 (constant rank)",
+        id="staged", early_stopping_patience=10**6, name="Curriculum: L1 -> L1,2 -> ... -> L1..5 (constant rank)",
         replay=True, num_stages=5, ranks=[32] * 5, num_epochs=2,
         stack_adapters=False,   # capacity-matched to the joint arms: ONE adapter
     ),
     "jointw": BaselineSpec(
-        id="jointw", name="Joint, exposure-weighted 5:4:3:2:1 (order removed, exposure kept)",
+        id="jointw", early_stopping_patience=10**6, name="Joint, exposure-weighted 5:4:3:2:1 (order removed, exposure kept)",
         replay=False, num_stages=1, ranks=[32], exposure_weighted=True, num_epochs=2,
     ),
     "jointu": BaselineSpec(
-        id="jointu", name="Joint, uniform (order and exposure both removed)",
+        id="jointu", early_stopping_patience=10**6, name="Joint, uniform (order and exposure both removed)",
         replay=False, num_stages=1, ranks=[32], num_epochs=5,
     ),
 }
