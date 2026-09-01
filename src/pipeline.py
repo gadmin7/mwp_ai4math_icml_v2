@@ -14,7 +14,8 @@ import subprocess
 import torch
 from transformers import AutoTokenizer, DataCollatorForLanguageModeling, TrainerCallback, TrainingArguments
 
-from src.data import MathSplits, assign_stages, exposure_weighted, log_split_sizes, stage_slice
+from src.data import (MathSplits, _level_int, assign_stages, exposure_weighted,
+                      log_split_sizes, stage_slice)
 from src.lora_schedule import BaselineSpec, get_baseline
 from src.train_stage import adapter_name_for, prepare_stage_model, stage_adapter_name
 
@@ -69,6 +70,45 @@ def make_preprocess_fn(tokenizer, max_length: int = 1024, template: str = None):
         return tokenizer(texts, truncation=True, max_length=max_length)
 
     return _fn
+
+
+@torch.no_grad()
+def per_level_val_loss(model, tokenizer, val_ds, template, batch_size=8, max_len=1024):
+    """Held-out loss on EVERY level after a stage, regardless of what that stage trained on.
+
+    This is the instrument the schedule questions need, and it is nearly free -- a
+    forward pass against ~40 min of training:
+
+      L1 loss RISES after a later stage   -> forgetting is real -> replay is needed
+      L4/L5 loss stays high               -> work remains -> later stages need MORE
+                                             capacity (expand), not less (shrink)
+      L2 loss falls after stage 1         -> transfer, measured during the actual run
+
+    Loss rather than gradient norm: the training model is 4-bit quantised, so gradients
+    w.r.t. base weights are unavailable, and a LoRA-parameter gradient is not comparable
+    across stages (B starts at zero and grows). Loss is comparable throughout.
+    """
+    was_training = model.training
+    model.eval()
+    out = {}
+    for lv in (1, 2, 3, 4, 5):
+        rows = [x for x in val_ds if _level_int(x) == lv]
+        if not rows:
+            continue
+        total, n = 0.0, 0
+        for i in range(0, len(rows), batch_size):
+            chunk = rows[i:i + batch_size]
+            texts = [template.format(problem=r["problem"], solution=r["solution"]) for r in chunk]
+            enc = tokenizer(texts, return_tensors="pt", padding=True, truncation=True,
+                            max_length=max_len).to(model.device)
+            labels = enc["input_ids"].clone()
+            labels[enc["attention_mask"] == 0] = -100
+            total += model(**enc, labels=labels).loss.item() * len(chunk)
+            n += len(chunk)
+        out[f"L{lv}"] = total / n
+    if was_training:
+        model.train()
+    return out
 
 
 def repo_name(hf_org: str, model_tag: str, baseline_id: str, stage: int) -> str:
@@ -304,6 +344,12 @@ def run_baseline(
         )
         trainer.train()
         all_log_history[f"stage_{stage}"] = trainer.state.log_history
+
+        # Probe EVERY level, not just the ones this stage trained on -- that is what
+        # makes forgetting and residual work visible.
+        lv_loss = per_level_val_loss(model, tokenizer, splits.val, PROMPT_TEMPLATES[prompt])
+        all_log_history[f"stage_{stage}_per_level_val_loss"] = lv_loss
+        print("  per-level val loss: " + "  ".join(f"{k}={v:.4f}" for k, v in lv_loss.items()))
 
         adapter_name = adapter_name_for(baseline, stage)
         # peft nests a multi-adapter model's save under save_directory/<adapter_name>/ --
