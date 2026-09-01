@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.data import MathSplits
 from src.lora_schedule import BASELINES, get_baseline
 from src.pipeline import run_baseline
-from src.train_stage import stage_adapter_name
+from src.train_stage import adapter_name_for, stage_adapter_name
 
 TINY_MODEL = "hf-internal-testing/tiny-random-LlamaForCausalLM"
 
@@ -91,7 +91,7 @@ def main():
 
         print("\n=== verifying on-disk checkpoints ===")
         for stage in range(1, spec.num_stages + 1):
-            adapter_dir = os.path.join(tmp, f"{spec.id}-stage{stage}", stage_adapter_name(stage))
+            adapter_dir = os.path.join(tmp, f"{spec.id}-stage{stage}", adapter_name_for(spec, stage))
             for fname in ("adapter_model.safetensors", "adapter_config.json", "README.md"):
                 path = os.path.join(adapter_dir, fname)
                 assert os.path.exists(path), f"missing {path}"

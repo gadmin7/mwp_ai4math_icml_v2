@@ -16,7 +16,7 @@ from transformers import AutoTokenizer, DataCollatorForLanguageModeling, Trainer
 
 from src.data import MathSplits, assign_stages, exposure_weighted, log_split_sizes, stage_slice
 from src.lora_schedule import BaselineSpec, get_baseline
-from src.train_stage import prepare_stage_model, stage_adapter_name
+from src.train_stage import adapter_name_for, prepare_stage_model, stage_adapter_name
 
 # Defined in src/prompts.py so analysis scripts can import them without
 # pulling in Trainer/peft; re-exported here for backwards compatibility.
@@ -272,7 +272,7 @@ def run_baseline(
 
         prev_path = None
         if stage > 1 and not push_to_hub:
-            prev_stage_name = stage_adapter_name(stage - 1)
+            prev_stage_name = adapter_name_for(baseline, stage - 1)
             prev_path = os.path.join(output_dir, f"{baseline_id}-stage{stage - 1}", prev_stage_name)
 
         model = prepare_stage_model(
@@ -305,7 +305,7 @@ def run_baseline(
         trainer.train()
         all_log_history[f"stage_{stage}"] = trainer.state.log_history
 
-        adapter_name = stage_adapter_name(stage)
+        adapter_name = adapter_name_for(baseline, stage)
         # peft nests a multi-adapter model's save under save_directory/<adapter_name>/ --
         # that nested folder is the actual flat checkpoint we want at the repo root.
         # save_embedding_layers=False: we never resize the vocab (make_tokenizer maps

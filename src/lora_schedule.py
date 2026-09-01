@@ -47,6 +47,13 @@ class BaselineSpec:
     # same number of example-passes -- otherwise the comparison measures compute, not
     # schedule. See CURRICULUM ARMS below for the arithmetic.
     num_epochs: int = 5
+    # True  = PLRS-style: a NEW frozen adapter per stage (capacity grows with stages).
+    # False = one adapter trained continuously as the data grows -- standard curriculum
+    #         learning, and the only way a staged arm is capacity-matched to a joint one.
+    # Stacking also fights transfer here: each new adapter is randomly initialised into
+    # an independent subspace (measured: rank of union 510/510), so it cannot reuse what
+    # the previous stage learned.
+    stack_adapters: bool = True
 
     def stage_config(self, stage: int) -> LoraStageConfig:
         r = self.ranks[stage - 1]
@@ -219,6 +226,7 @@ BASELINES = {
     "staged": BaselineSpec(
         id="staged", name="Curriculum: L1 -> L1,2 -> ... -> L1..5 (constant rank)",
         replay=True, num_stages=5, ranks=[32] * 5, num_epochs=2,
+        stack_adapters=False,   # capacity-matched to the joint arms: ONE adapter
     ),
     "jointw": BaselineSpec(
         id="jointw", name="Joint, exposure-weighted 5:4:3:2:1 (order removed, exposure kept)",

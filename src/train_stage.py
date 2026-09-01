@@ -29,6 +29,16 @@ def stage_adapter_name(stage: int) -> str:
     return f"{STAGE_PREFIX}{stage}"
 
 
+def adapter_name_for(baseline, stage: int) -> str:
+    """Which adapter this stage actually writes to.
+
+    When stacking, each stage owns its own adapter. When not stacking there is only
+    ever one adapter ("stage_1") that keeps training as the data grows, so every
+    stage's checkpoint is a snapshot of that same adapter.
+    """
+    return stage_adapter_name(stage if baseline.stack_adapters else 1)
+
+
 def _bnb_config() -> BitsAndBytesConfig:
     return BitsAndBytesConfig(
         load_in_4bit=True,
@@ -91,6 +101,14 @@ def prepare_stage_model(
 
     if prev_model is not None:
         model = prev_model
+        if not baseline.stack_adapters:
+            # Continue training the SAME adapter rather than adding a new one, so a
+            # 5-stage arm has exactly the capacity of a 1-stage arm and the comparison
+            # isolates data ORDER instead of parameter count.
+            for n, p in model.named_parameters():
+                if "lora_" in n:
+                    p.requires_grad_(True)
+            return model
     else:
         if prev_adapter_path is None:
             raise ValueError("stage > 1 requires either prev_model or prev_adapter_path")

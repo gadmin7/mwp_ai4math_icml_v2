@@ -223,8 +223,11 @@ def stage_sources(
     # Explicit None check, not `or`: through_stage=0 means "no adapters at all"
     # (zero-shot base model), and `0 or num_stages` would silently load everything.
     last = baseline.num_stages if through_stage is None else through_stage
+    # Non-stacked arms train ONE adapter throughout, so each stage's checkpoint is a
+    # snapshot of the same weights -- load only the final one, not all of them.
+    stages = range(1, last + 1) if baseline.stack_adapters else ([last] if last else [])
     sources = []
-    for stage in range(1, last + 1):
+    for stage in stages:
         local = None
         if local_dir:
             candidate = os.path.join(
