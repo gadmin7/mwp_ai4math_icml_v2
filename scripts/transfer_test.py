@@ -152,6 +152,22 @@ def main():
         before[name] = (n, b)
         print(f"  {name:<9} ||g|| = {n:.6f}")
 
+    # The BEFORE pass already computed each level's gradient basis at the base weights,
+    # which is exactly what gradient_overlap.py measures -- so report cross-level overlap
+    # here for free. (No same-task ceiling: that needs two disjoint halves per level.
+    # The shuffled row is the floor, and it is the reference that matters most.)
+    print("\n=== cross-level gradient overlap at BASE weights (free from the above) ===")
+    names = ["L1", "L2", "L3", "L4", "L5", "shuffled"]
+    print("           " + "".join(f"{n:>10}" for n in names))
+    xlevel = {}
+    for a in names:
+        row = f"  {a:<9}"
+        for b in names:
+            v = mean_overlap(before[a][1], before[b][1])
+            xlevel[f"{a}-{b}"] = v
+            row += "         -" if a == b else f"{v:>10.4f}"
+        print(row)
+
     print(f"\n=== TRAINING on level 1 ({args.epochs} epochs, lr={args.lr}) ===")
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
     step = 0
@@ -213,7 +229,8 @@ def main():
         print("  training on everything at once rather than staging by level.")
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    json.dump({"args": vars(args), "shuffled_drop_pct": shuf_drop, "probes": rows},
+    json.dump({"args": vars(args), "shuffled_drop_pct": shuf_drop, "probes": rows,
+           "cross_level_overlap_at_base": xlevel},
               open(args.out, "w"), indent=2)
     print(f"\nsaved -> {args.out}")
 
