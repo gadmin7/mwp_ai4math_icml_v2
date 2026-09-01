@@ -27,4 +27,14 @@ PROMPT_TEMPLATE_COT = (
     "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n{solution}<|eot_id|>"
 )
 
-PROMPT_TEMPLATES = {"default": PROMPT_TEMPLATE, "cot": PROMPT_TEMPLATE_COT}
+# For BASE (non-instruct) models. The chat special tokens above exist in the shared
+# Llama-3.2 vocabulary but a base model was never trained to use them, so it assigns
+# them high loss and their gradients would dominate any measurement -- swamping the
+# math signal we are actually trying to measure.
+PROMPT_TEMPLATE_PLAIN = "Problem: {problem}\nSolution: {solution}"
+
+PROMPT_TEMPLATES = {
+    "default": PROMPT_TEMPLATE,
+    "cot": PROMPT_TEMPLATE_COT,
+    "plain": PROMPT_TEMPLATE_PLAIN,
+}
