@@ -45,7 +45,7 @@ def main():
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--out-dir", default="results")
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--prompt", choices=["default", "cot"], default="default",
+    parser.add_argument("--prompt", choices=["default", "cot", "plain"], default=None,
                         help="cot: explicitly request the '## Step N' scaffold the "
                              "instruct model uses zero-shot, to test whether fine-tuning "
                              "merely overwrote the default answering format")
@@ -57,6 +57,13 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
     baseline = get_baseline(cfg["baseline_id"])
+    # Default to the config's prompt, NOT a hardcoded "default". Training reads it from
+    # the config (run_baseline.py), so a hardcoded eval default silently trains on one
+    # format and evaluates on another -- which is exactly what happened: base-model arms
+    # trained on "plain" were scored with the chat template and degenerated to ~0.2% EM.
+    if args.prompt is None:
+        args.prompt = cfg.get("prompt", "default")
+    print(f"prompt: {args.prompt} (from {'CLI' if '--prompt' in sys.argv else 'config'})")
     if baseline.num_stages == 1:
         raise SystemExit(f"{baseline.id} is single-stage; nothing intermediate to evaluate")
 
