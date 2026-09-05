@@ -53,6 +53,7 @@ def main():
         dataloader_num_workers=args.dataloader_num_workers,
         map_num_proc=args.map_num_proc,
         prompt=cfg.get("prompt", "default"),
+        gradient_checkpointing=cfg.get("gradient_checkpointing", False),
     )
 
 

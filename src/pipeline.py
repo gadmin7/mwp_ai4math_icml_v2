@@ -186,7 +186,7 @@ class BestAdapterCallback(TrainerCallback):
 
 def build_training_args(
     output_dir: str, batch_size: int, n_train_examples: int, quantize: bool, dataloader_num_workers: int,
-    num_epochs: int = NUM_EPOCHS,
+    num_epochs: int = NUM_EPOCHS, gradient_checkpointing: bool = False,
 ) -> TrainingArguments:
     """Construct TrainingArguments in a way that survives the transformers API churn.
 
@@ -232,8 +232,17 @@ def build_training_args(
     #   weight_decay 0.01      -- was unset (0)
     #   max_grad_norm 0.3      -- QLoRA's value; framework default is 1.0
     #   effective batch 16     -- prescribed; free via accumulation
-    kwargs["gradient_accumulation_steps"] = 2
+    # Effective batch is held at 16 across every arm. batch_size x grad_accum is the
+    # only knob: 8x2 on an 80GB card, 4x4 on a 40GB one. Both average the gradient over
+    # the same 16 examples, and padding is label-masked, so the two are equivalent --
+    # a 40GB run stays comparable to the arms already completed on 80GB.
+    kwargs["gradient_accumulation_steps"] = max(1, 16 // batch_size)
     kwargs["weight_decay"] = 0.01
+    # Pure recompute-for-memory: identical gradients, ~30% slower. Measured peak was
+    # 53GB at batch 8 without it, so a 40GB card needs this and/or a smaller batch.
+    if gradient_checkpointing:
+        kwargs["gradient_checkpointing"] = True
+        kwargs["gradient_checkpointing_kwargs"] = {"use_reentrant": False}
     # max_grad_norm is the one prescription that does NOT transfer out of QLoRA.
     # 0.3 is QLoRA's value, chosen partly for stability under 4-bit quantisation
     # noise; unquantised, clipping that aggressively mostly just slows learning.
@@ -292,6 +301,7 @@ def run_baseline(
     dataloader_num_workers: int = 8,
     map_num_proc: int = 8,
     prompt: str = "default",
+    gradient_checkpointing: bool = False,
 ) -> dict:
     """dataloader_num_workers/map_num_proc default to 8 -- tuned for a ~28 vCPU
     instance (JarvisLabs A100 80GB tier); drop to 2-4 on a 16-vCPU box.
@@ -348,6 +358,7 @@ def run_baseline(
             quantize=quantize,
             dataloader_num_workers=dataloader_num_workers,
             num_epochs=baseline.num_epochs,
+            gradient_checkpointing=gradient_checkpointing,
         )
         trainer = Trainer(
             model=model,

@@ -1,0 +1,16 @@
+baseline_id: staged_nr
+base_model_id: meta-llama/Llama-3.2-1B
+model_tag: llama1b-base
+hf_org: GT1999
+push_to_hub: true
+# No quantisation: a 1B model is 2.5GB in bf16 on an 80GB A100. Removes quantisation
+# noise and keeps base-weight gradients available for analysis.
+quantize: false
+# BASE model: the chat template is meaningless to it (never trained on those tokens),
+# so its loss would swamp the maths signal. See src/prompts.py.
+prompt: plain
+batch_size: 4
+# 40GB card: measured peak was 53GB at batch 8 without checkpointing. batch 4 +
+# accum 4 keeps the effective batch at 16, so this stays comparable to the 80GB runs.
+gradient_checkpointing: true
+seed: 42
