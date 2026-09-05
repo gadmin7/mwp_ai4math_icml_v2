@@ -235,6 +235,27 @@ BASELINES = {
         id="jointw", early_stopping_patience=10**6, name="Joint, exposure-weighted 5:4:3:2:1 (order removed, exposure kept)",
         replay=False, num_stages=1, ranks=[32], exposure_weighted=True, num_epochs=2,
     ),
+    # No-replay curriculum: stage i sees ONLY level i. Supplies the two comparisons the
+    # replay arm structurally cannot:
+    #
+    #   staged_nr vs jointu   ORDER at UNIFORM exposure. Cleaner than staged-vs-jointw,
+    #                         which matches exposure at an imbalanced 5:4:3:2:1 -- here
+    #                         both arms see every example exactly once, so ordering is
+    #                         the only difference left.
+    #   staged vs staged_nr   the REPLAY effect, and the only way to measure forgetting.
+    #                         Under cumulative replay L1 is retrained every stage, so its
+    #                         flat loss curve is guaranteed rather than informative; with
+    #                         no replay, L1 loss RISING after stage 2 is real forgetting.
+    #
+    # 5 epochs/stage (not 2) to match compute: 5 x 7124 = 35,620 example-passes, equal to
+    # jointu and within 0.4% of staged. The cost is more passes over each stage's smaller
+    # slice, which is inherent to no-replay staging rather than a choice we can avoid.
+    "staged_nr": BaselineSpec(
+        id="staged_nr", early_stopping_patience=10**6,
+        name="Curriculum, NO replay: stage i sees only level i",
+        replay=False, num_stages=5, ranks=[32] * 5, num_epochs=5,
+        stack_adapters=False,
+    ),
     "jointu": BaselineSpec(
         id="jointu", early_stopping_patience=10**6, name="Joint, uniform (order and exposure both removed)",
         replay=False, num_stages=1, ranks=[32], num_epochs=5,
