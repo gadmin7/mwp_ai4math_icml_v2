@@ -54,6 +54,7 @@ def main():
         map_num_proc=args.map_num_proc,
         prompt=cfg.get("prompt", "default"),
         gradient_checkpointing=cfg.get("gradient_checkpointing", False),
+        append_eos=cfg.get("append_eos", False),
     )
 
 

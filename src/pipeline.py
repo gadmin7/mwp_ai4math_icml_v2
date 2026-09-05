@@ -61,12 +61,28 @@ def make_tokenizer(base_model_id: str, token: str = None) -> AutoTokenizer:
     return tok
 
 
-def make_preprocess_fn(tokenizer, max_length: int = 1024, template: str = None):
+def make_preprocess_fn(tokenizer, max_length: int = 1024, template: str = None,
+                       append_eos: bool = False):
+    """Tokenise problem+solution pairs.
+
+    append_eos: the "plain" template has no terminator (unlike the chat template, which
+    ends in <|eot_id|>), so a base model trained on it never learns to stop. Measured
+    consequence: generations run to max_new_tokens every time, 61/100 contain multiple
+    \boxed{} and 24/100 contain none, and the answer extractor then picks up trailing
+    noise instead of the answer.
+
+    Off by default because the staged/jointw/jointu arms were trained without it --
+    enabling it for one arm would confound that arm's real variable with a change in
+    the training target. Turn it on for a clean re-run of ALL arms together.
+    """
     def _fn(examples):
         texts = [
             (template or PROMPT_TEMPLATE).format(problem=p, solution=s)
             for p, s in zip(examples["problem"], examples["solution"])
         ]
+        if append_eos and tokenizer.eos_token:
+            texts = [t if t.endswith(tokenizer.eos_token) else t + tokenizer.eos_token
+                     for t in texts]
         return tokenizer(texts, truncation=True, max_length=max_length)
 
     return _fn
@@ -302,6 +318,7 @@ def run_baseline(
     map_num_proc: int = 8,
     prompt: str = "default",
     gradient_checkpointing: bool = False,
+    append_eos: bool = False,
 ) -> dict:
     """dataloader_num_workers/map_num_proc default to 8 -- tuned for a ~28 vCPU
     instance (JarvisLabs A100 80GB tier); drop to 2-4 on a 16-vCPU box.
@@ -322,8 +339,9 @@ def run_baseline(
         print("train set is exposure-weighted (each example repeated 6-level times)")
 
     tokenizer = make_tokenizer(base_model_id, token=hf_token)
-    preprocess = make_preprocess_fn(tokenizer, template=PROMPT_TEMPLATES[prompt])
-    print(f"prompt template: {prompt}")
+    preprocess = make_preprocess_fn(tokenizer, template=PROMPT_TEMPLATES[prompt],
+                                    append_eos=append_eos)
+    print(f"prompt template: {prompt}  append_eos={append_eos}")
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
     model = None
