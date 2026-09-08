@@ -148,22 +148,27 @@ print(f"\nspread across levels: {sp:.4f} nats/token")
 """)
 
 md(r"""
-**Observation — and read the caveat first.** At the default `N_PER_LEVEL = 8` this measurement is
-*dominated by sampling noise*. You will see a spread of perhaps 0.3 nats/token scattered across
-levels in no particular order. That is noise, not signal.
+**Caveat first: `N_PER_LEVEL = 8` cannot resolve this.** At n=8 you get a spread of ~0.3
+nats/token scattered across levels in no order — pure sampling noise. **Raise `N_PER_LEVEL` to 64**
+before reading anything into this cell. It is the slowest cell in the notebook for exactly that
+reason.
 
-Measured properly over the full 5000-problem test set, the real numbers are
+At n=64 on Qwen2.5-0.5B-Instruct you should see roughly:
 
 ```
-L1 0.930   L2 0.947   L3 0.927   L4 0.939   L5 0.922      spread 0.024
+L1 0.724   L2 0.784   L3 0.822   L4 0.787   L5 0.847      spread 0.123
 ```
 
-— nearly flat, with Level 5 slightly *lower* than Level 1. The genuine effect (0.02) is about
-thirteen times smaller than the noise you get at n=8, so **raise `N_PER_LEVEL` to 64 or more before
-believing anything here.** It is the slowest cell in the notebook for exactly that reason.
+**Observation.** Difficulty does raise the per-token loss — but only by about **17%** from Level 1
+to Level 5. Compare that to the growth in solution length over the same span, which is about
+**3.3x**. The label moves length far more than it moves per-token difficulty.
 
-This is the first surprise, and it is worth the wait. By the metric that training actually
-optimises, the "hardest" problems in the benchmark are barely harder at all.
+And the effect is fragile. Measured on a model that has been *fine-tuned on MATH*, the per-token
+loss flattens completely — we measured `L1 0.930 -> L5 0.922`, i.e. Level 5 slightly *easier* than
+Level 1. Training on the dataset erases what little difficulty signal the loss had.
+
+Either way the conclusion holds: **per-token difficulty is a small effect; length is a large one.**
+Keep that ratio in mind for the next cell, where accuracy falls by many orders of magnitude.
 
 Why not? Because teacher forcing has deleted the hard part. Human difficulty is the difficulty of
 **searching** for a solution. Here, the solution is already written in the context — the model is
@@ -354,9 +359,14 @@ print(f"\nrandom-chance overlap for these shapes is roughly K/d, a few thousandt
 """)
 
 md(r"""
-**Observation.** Every entry is enormous compared to chance — commonly 0.25 to 0.9 against a chance
-value of a few hundredths or less. It looks like overwhelming evidence that all five levels are
-essentially one task.
+**Observation.** Every entry is enormous compared to chance. At n=64 on Qwen2.5-0.5B you should see
+values around 0.46–0.54 against a chance value near 0.018 — roughly **thirty times** what two
+unrelated subspaces would give.
+
+There is real structure in there too: adjacent levels score highest (L1–L2 about 0.54) and the most
+distant pair scores lowest (L1–L5 about 0.46), decaying smoothly in between. It looks like
+overwhelming evidence that all five levels are essentially one task, with a gentle difficulty
+gradient on top.
 
 Hold that thought for exactly one cell.
 """)
@@ -400,8 +410,10 @@ print(f"\n  usable range above the floor: {real - floor:.4f}")
 """)
 
 md(r"""
-**Observation.** The gibberish floor is enormous — in our runs, 0.83 on an instruction-tuned model
-against a real overlap of 0.93.
+**Observation.** The gibberish floor is enormous. At n=64 on Qwen2.5-0.5B we measure a real
+cross-level overlap of 0.510 against a shuffled floor of 0.414 — so **81% of the signal is floor**,
+and the entire interpretable range is 0.096. On an instruction-tuned Llama with a chat template it
+was worse still: 0.93 real against a 0.83 floor.
 
 Word salad shares almost as much gradient subspace with real mathematics as one difficulty level
 shares with another.
