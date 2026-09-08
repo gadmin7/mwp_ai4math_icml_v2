@@ -148,10 +148,22 @@ print(f"\nspread across levels: {sp:.4f} nats/token")
 """)
 
 md(r"""
-**Observation.** The per-token loss is nearly flat. Level 5 is often *lower* than Level 1.
+**Observation — and read the caveat first.** At the default `N_PER_LEVEL = 8` this measurement is
+*dominated by sampling noise*. You will see a spread of perhaps 0.3 nats/token scattered across
+levels in no particular order. That is noise, not signal.
 
-This is the first surprise. By the metric that training actually optimises, the "hardest" problems
-in the benchmark are not harder at all.
+Measured properly over the full 5000-problem test set, the real numbers are
+
+```
+L1 0.930   L2 0.947   L3 0.927   L4 0.939   L5 0.922      spread 0.024
+```
+
+— nearly flat, with Level 5 slightly *lower* than Level 1. The genuine effect (0.02) is about
+thirteen times smaller than the noise you get at n=8, so **raise `N_PER_LEVEL` to 64 or more before
+believing anything here.** It is the slowest cell in the notebook for exactly that reason.
+
+This is the first surprise, and it is worth the wait. By the metric that training actually
+optimises, the "hardest" problems in the benchmark are barely harder at all.
 
 Why not? Because teacher forcing has deleted the hard part. Human difficulty is the difficulty of
 **searching** for a solution. Here, the solution is already written in the context — the model is
@@ -342,8 +354,9 @@ print(f"\nrandom-chance overlap for these shapes is roughly K/d, a few thousandt
 """)
 
 md(r"""
-**Observation.** Every entry is enormous compared to chance — often 0.5 to 0.9 where chance is
-0.005. It looks like overwhelming evidence that all five levels are essentially one task.
+**Observation.** Every entry is enormous compared to chance — commonly 0.25 to 0.9 against a chance
+value of a few hundredths or less. It looks like overwhelming evidence that all five levels are
+essentially one task.
 
 Hold that thought for exactly one cell.
 """)
