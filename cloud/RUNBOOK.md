@@ -83,7 +83,7 @@ that it was registered *after* the instance booted: re-add it and restart the in
 ## 4. Bootstrap
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/gadmin7/mwp_ai4math_icml_v2/main/cloud/jarvislabs_setup.sh -o setup.sh
+curl -sSL https://raw.githubusercontent.com/gadmin7/difficulty-geometry/main/cloud/jarvislabs_setup.sh -o setup.sh
 bash setup.sh
 ```
 
@@ -107,7 +107,7 @@ Every shell needs the environment first:
 source /home/mwp-venv/bin/activate
 export HF_HOME=/home/.cache/huggingface
 export HF_TOKEN=$(hf auth token)
-cd /home/mwp_ai4math_icml_v2 && mkdir -p runs
+cd /home/difficulty-geometry && mkdir -p runs
 ```
 
 > Paths are under `/home`, not `~`, deliberately — see §7.
@@ -207,7 +207,7 @@ weight-geometry analysis load. Pull anything you want to keep locally:
 
 ```bash
 # from your Mac
-scp -P <port> -r root@sshd.jarvislabs.ai:/home/mwp_ai4math_icml_v2/runs ./runs-from-cloud
+scp -P <port> -r root@sshd.jarvislabs.ai:/home/difficulty-geometry/runs ./runs-from-cloud
 ```
 
 `runs/*-log_history.json` holds the per-stage loss curves and step counts — worth

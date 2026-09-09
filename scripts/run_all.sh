@@ -19,7 +19,7 @@
 set -uo pipefail
 
 ORDER="${ORDER:-9 10 1 2 6 7 8 11 12 13 3 4 5}"
-REPO_DIR="${REPO_DIR:-/home/mwp_ai4math_icml_v2}"
+REPO_DIR="${REPO_DIR:-/home/difficulty-geometry}"
 # configs/*.yaml carry batch_size 8 (~19GB peak: the logits tensor
 # batch*seq*128256 dominates, not the 1B of weights). Override without editing 13
 # configs, e.g. BATCH_SIZE=4 on a 24GB card.

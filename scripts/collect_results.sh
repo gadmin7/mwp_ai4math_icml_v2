@@ -12,7 +12,7 @@
 # check that before deleting the instance, since deleting takes /home with it.
 set -uo pipefail
 
-REPO_DIR="${REPO_DIR:-/home/mwp_ai4math_icml_v2}"
+REPO_DIR="${REPO_DIR:-/home/difficulty-geometry}"
 cd "$REPO_DIR" || { echo "REPO_DIR not found: $REPO_DIR" >&2; exit 1; }
 
 STAMP=$(date +%Y%m%d-%H%M)

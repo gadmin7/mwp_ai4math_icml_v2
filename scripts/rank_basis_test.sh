@@ -18,7 +18,7 @@
 # ~20 min, evaluation only, no training. Results in results/.
 set -uo pipefail
 
-cd "${REPO_DIR:-/home/mwp_ai4math_icml_v2}" || { echo "repo not found" >&2; exit 1; }
+cd "${REPO_DIR:-/home/difficulty-geometry}" || { echo "repo not found" >&2; exit 1; }
 [ -n "${HF_TOKEN:-}" ] || { echo "HF_TOKEN not set: export HF_TOKEN=\$(hf auth token)" >&2; exit 1; }
 
 echo "=== zero-shot (no adapters) on level 1 ==="
