@@ -66,11 +66,17 @@ def target_params(model, modules, every_n_layers):
     return out
 
 
-def grad_subspaces(model, params, tokenizer, problems, k, batch_size, max_len, device):
+def grad_subspaces(model, params, tokenizer, problems, k, batch_size, max_len, device,
+                   keep_grads=False):
     """Mean gradient over `problems`, reduced to its top-k right-singular directions.
 
-    We SVD immediately and keep only the k basis vectors: holding full gradients for
-    every level would be ~4GB each.
+    Returns (bases, flats). We SVD immediately because holding full gradients for every
+    level is expensive; `flats` is None unless keep_grads is set.
+
+    keep_grads is needed for SIGNED alignment. Subspace overlap is unsigned and about
+    spans -- g and -g span the same line and score 1.0 while being maximally opposed --
+    so it cannot distinguish transfer from interference. That needs the actual vectors.
+    Cost: ~80MB per level for a 0.5B model with 8 matrices, ~320MB for a 1B.
     """
     for p in params.values():
         p.grad = None
@@ -86,17 +92,19 @@ def grad_subspaces(model, params, tokenizer, problems, k, batch_size, max_len, d
         loss.backward()          # accumulates
         n_batches += 1
 
-    bases = {}
+    bases, flats = {}, ({} if keep_grads else None)
     for name, p in params.items():
         if p.grad is None:
             continue
         G = (p.grad / n_batches).float()          # [d_out, d_in]
+        if keep_grads:
+            flats[name] = G.reshape(-1).cpu().clone()
         # right singular vectors span the INPUT directions the task pushes on,
         # which is the same object as rowspace(A) in a LoRA adapter.
         _, _, Vh = torch.linalg.svd(G, full_matrices=False)
         bases[name] = Vh[:k].T.contiguous().cpu()  # [d_in, k], orthonormal columns
         p.grad = None
-    return bases
+    return bases, flats
 
 
 def shuffled_pairs(pairs, seed):
@@ -128,6 +136,24 @@ def overlap(Q1, Q2):
     return (s[:k] ** 2).sum().item() / k
 
 
+def cosine(f1, f2):
+    """Mean signed cosine between two sets of flattened gradients, per weight matrix.
+
+    This is the quantity continual-learning theory is actually about (Riemer et al.,
+    ICLR 2019): a positive gradient dot product means learning one task improves the
+    other (TRANSFER), negative means it degrades it (INTERFERENCE), and zero means
+    neither. Orthogonality is the neutral point, not the good one -- methods that
+    enforce it give up transfer to buy stability.
+
+    For independent random vectors in D dimensions the cosine is ~0 with standard
+    deviation 1/sqrt(D); at D in the millions that is under 0.001, so anything above
+    about 0.01 is real.
+    """
+    keys = sorted(set(f1) & set(f2))
+    vals = [float(torch.nn.functional.cosine_similarity(f1[n], f2[n], dim=0)) for n in keys]
+    return sum(vals) / len(vals)
+
+
 def mean_overlap(b1, b2):
     common = sorted(set(b1) & set(b2))
     if not common:
@@ -148,6 +174,11 @@ def main():
     ap.add_argument("--modules", default="q_proj,down_proj")
     ap.add_argument("--out", default="results/gradient_overlap.json")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--signed", action="store_true",
+                    help="also report SIGNED cosine alignment between level gradients. "
+                         "Subspace overlap is unsigned and cannot tell transfer from "
+                         "interference; this can. Holds full gradients in RAM "
+                         "(~80MB/level at 0.5B, ~320MB at 1B).")
     args = ap.parse_args()
 
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -179,7 +210,7 @@ def main():
     train = splits.train
     rng = torch.Generator().manual_seed(args.seed)
 
-    halves = {}
+    halves, gvecs = {}, {}
     for lv in (1, 2, 3, 4, 5):
         idx = [i for i, x in enumerate(train) if _level_int(x) == lv]
         perm = torch.randperm(len(idx), generator=rng).tolist()
@@ -191,15 +222,20 @@ def main():
         for tag, sel in (("a", take[:half]), ("b", take[half:])):
             probs = [(train[i]["problem"], train[i]["solution"]) for i in sel]
             print(f"  gradient: level {lv}{tag}  (n={len(probs)})")
-            halves[(lv, tag)] = grad_subspaces(model, params, tok, probs, args.k,
-                                               args.batch_size, args.max_len, device)
+            b, f = grad_subspaces(model, params, tok, probs, args.k, args.batch_size,
+                                  args.max_len, device, keep_grads=args.signed)
+            halves[(lv, tag)] = b
+            if args.signed:
+                gvecs[(lv, tag)] = f
 
     # DIFFERENT-TASK floor: level-1 problems with their words shuffled.
     lv1_idx = [i for i, x in enumerate(train) if _level_int(x) == 1][:args.n_per_level]
     lv1_pairs = [(train[i]["problem"], train[i]["solution"]) for i in lv1_idx]
     print(f"  gradient: level 1 SHUFFLED  (n={len(lv1_pairs)})  [different-task floor]")
-    shuffled = grad_subspaces(model, params, tok, shuffled_pairs(lv1_pairs, args.seed),
-                              args.k, args.batch_size, args.max_len, device)
+    shuffled, shuf_vec = grad_subspaces(model, params, tok,
+                                        shuffled_pairs(lv1_pairs, args.seed), args.k,
+                                        args.batch_size, args.max_len, device,
+                                        keep_grads=args.signed)
 
     chance = sum(args.k / d for d in d_in.values()) / len(d_in)
     ceiling = {lv: mean_overlap(halves[(lv, "a")], halves[(lv, "b")]) for lv in range(1, 6)}
@@ -244,8 +280,43 @@ def main():
         print(f"  L{key[-1]} vs L1: {v:.4f}  = {100*frac:6.1f}% of the way to ceiling")
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    signed_out = None
+    if args.signed:
+        print("\n=== SIGNED GRADIENT ALIGNMENT (cosine) ===")
+        print("  positive = TRANSFER, negative = INTERFERENCE, zero = neither")
+        names = [f"L{lv}" for lv in range(1, 6)] + ["shuffled"]
+        vecs = {f"L{lv}": gvecs[(lv, "a")] for lv in range(1, 6)}
+        vecs["shuffled"] = shuf_vec
+        print("           " + "".join(f"{n:>10}" for n in names))
+        cosmat = {}
+        for a in names:
+            row = f"  {a:<9}"
+            for b in names:
+                if a == b:
+                    row += "         -"
+                else:
+                    c = cosine(vecs[a], vecs[b]); cosmat[f"{a}-{b}"] = c
+                    row += f"{c:>10.4f}"
+            print(row)
+        cross_cos = [cosmat[f"L{i}-L{j}"] for i in range(1, 6) for j in range(i + 1, 6)]
+        shuf = [cosmat[f"L{lv}-shuffled"] for lv in range(1, 6)]
+        print(f"\n  mean cross-level cosine : {sum(cross_cos)/len(cross_cos):+.4f}")
+        print(f"  mean vs shuffled        : {sum(shuf)/len(shuf):+.4f}")
+        print(f"  most negative pair      : {min(cosmat.values()):+.4f}")
+        if min(cross_cos) > 0.01:
+            print("\n  -> ALL PAIRS POSITIVE: transfer regime. Every level's update helps every")
+            print("     other. Orthogonalising these would trade that away for stability")
+            print("     against forgetting that is not happening.")
+        elif min(cross_cos) < -0.01:
+            print("\n  -> NEGATIVE PAIRS PRESENT: genuine interference. This is the regime")
+            print("     GPM / O-LoRA style orthogonalisation is built for.")
+        else:
+            print("\n  -> NEAR ZERO: already effectively orthogonal; enforcing it adds nothing.")
+        signed_out = cosmat
+
     json.dump({"chance": chance, "floor_shuffled": floor, "ceiling": ceiling,
-               "ceiling_mean": ceil_mean, "cross": cross, "args": vars(args)},
+               "ceiling_mean": ceil_mean, "cross": cross, "args": vars(args),
+              **({"signed_cosine": signed_out} if signed_out else {})},
               open(args.out, "w"), indent=2)
     print(f"\nsaved -> {args.out}")
     print("\nnear ceiling -> levels share structure; reuse it (warm-start / nested subspace)"
